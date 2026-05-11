@@ -1,0 +1,63 @@
+# docker/docker-compose.yml
+
+version: '3.8'
+
+services:
+  # Neo4j图数据库
+  neo4j:
+    image: neo4j:5.12
+    container_name: zhijian_neo4j
+    ports:
+      - "7474:7474"  # Neo4j Browser HTTP
+      - "7687:7687"  # Bolt协议
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_PLUGINS=["apoc"]
+    volumes:
+      - ./neo4j/data:/data
+      - ./neo4j/logs:/logs
+    restart: unless-stopped
+
+  # Milvus向量数据库
+  milvus:
+    image: milvusdb/milvus:v2.3.4
+    container_name: zhijian_milvus
+    ports:
+      - "19530:19530"  # Milvus服务端口
+      - "9091:9091"    # Prometheus metrics
+    environment:
+      - ETCD_ENDPOINTS=localhost:2379
+      - MINIO_ADDRESS=localhost:9000
+    volumes:
+      - ./milvus/volumes:/var/lib/milvus
+    restart: unless-stopped
+
+  # etcd（Milvus依赖）
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: zhijian_etcd
+    ports:
+      - "2379:2379"
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - ./etcd/data:/etcd
+    restart: unless-stopped
+
+  # MinIO（Milvus存储后端）
+  minio:
+    image: minio/minio:latest
+    container_name: zhijian_minio
+    ports:
+      - "9000:9000"   # API端口
+      - "9001:9001"   # Console端口
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - ./minio/data:/data
+    command: server /data --console-address ":9001"
+    restart: unless-stopped

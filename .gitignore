@@ -1,0 +1,114 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.so
+.Python
+env/
+venv/
+.venv*/
+ENV/
+env.bak/
+venv.bak/
+
+# Virtual environments
+.venv_paddle/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+server.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+test_chroma/
+chroma_zhijian/
+
+# Model files, weights, and training data (all large)
+models/
+checkpoints/
+tesseract_training/
+
+# Training artifacts
+training_history.json
+train_*.log
+
+# OCR results (generated)
+ocr_results_*.json
+ocr_page*.json
+ocr_kangxi_*.json
+ocr_paddle_result.json
+ocr_tesseract_result.json
+ocr_kangxi_tesseract.txt
+ocr_test_result.json
+
+# Temp files
+temp_*.json
+temp_*.txt
+temp_*.log
+all_matches.json
+entity_names.json
+segment.txt
+
+# Session transcripts and conversation logs
+conversation-*.txt
+*-this-session-is-being-continued-from-a-previous-co.txt
+
+# Generated images from tests
+test_page*.png
+page_*.png
+page_*_vis.png
+page_*_processed.png
+ocr_page*_vis.png
+
+# Docker volumes
+docker/neo4j/
+docker/milvus/
+docker/etcd/
+docker/minio/
+
+# Frontend build output
+frontend/dist/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+Desktop.ini
+$RECYCLE.BIN/
+
+# Project-specific
+collation_versions/
+reports/
+*.pptx
+
+# Data (too large for git, see README for setup)
+data/
+tessdata/
