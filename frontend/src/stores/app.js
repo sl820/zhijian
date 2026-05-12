@@ -31,10 +31,7 @@ export const useAppStore = defineStore('app', () => {
   const projectInfo = ref({
     name: '志鉴',
     subtitle: '古籍方志智能化整理与知识服务平台',
-    version: 'v1.0',
-    competition: '2026年中国大学生计算机设计大赛',
-    school: '河北大学',
-    track: '人工智能应用赛道'
+    version: 'v1.0'
   })
 
   // ==================== 计算属性 ====================

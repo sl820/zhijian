@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="志鉴 — 古籍方志智能化整理平台",
     version="1.0.0",
-    description="2026中国大学生计算机设计大赛参赛作品",
+    description="古籍方志智能化整理与知识服务平台",
     lifespan=lifespan
 )
 
