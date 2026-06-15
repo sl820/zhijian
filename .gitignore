@@ -112,3 +112,10 @@ reports/
 # Data (too large for git, see README for setup)
 data/
 tessdata/
+
+# Stale deployment artifacts (Apr 2026 tarball + extracted bundle, do not commit)
+zhijian_deploy.tar.gz
+zhijian_pkg2/
+
+# Temp test fixtures
+tests/_tmp_*.json

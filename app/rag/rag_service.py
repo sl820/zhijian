@@ -56,8 +56,9 @@ class RAGService:
         if self.retriever is None:
             logger.info("正在初始化检索器...")
             from app.database.chroma_client import ChromaVectorClient
-            chroma_client = ChromaVectorClient()
-            self.retriever = Retriever(chroma_client)
+            from .. import config as app_config
+            vector_client = ChromaVectorClient(persist_directory=str(app_config.CHROMA_PERSIST_DIR))
+            self.retriever = Retriever(vector_client=vector_client)
         return self.retriever
 
     def _get_generator(self) -> Generator:
@@ -118,7 +119,7 @@ class RAGService:
         )
 
         # Step 4: 存入Milvus
-        milvus_client = retriever.milvus_client
+        milvus_client = retriever.vector_client
 
         # 创建或使用已有collection
         if not milvus_client.has_collection(self.collection_name):
@@ -189,7 +190,7 @@ class RAGService:
 
         # Step 3: Prepare metadata and insert
         retriever = self._get_retriever()
-        milvus_client = retriever.milvus_client
+        milvus_client = retriever.vector_client
 
         # Create collection if needed
         if not milvus_client.has_collection(self.collection_name):
@@ -308,7 +309,7 @@ class RAGService:
         """
         name = collection_name or self.collection_name
         retriever = self._get_retriever()
-        milvus_client = retriever.milvus_client
+        milvus_client = retriever.vector_client
 
         if drop_existing and milvus_client.has_collection(name):
             milvus_client.drop_collection(name)

@@ -95,22 +95,27 @@ class Retriever:
 
     def __init__(
         self,
-        milvus_client: Optional[ChromaVectorClient] = None,
+        vector_client: Optional[ChromaVectorClient] = None,
         embedder: Optional[Callable[[str], List[float]]] = None,
-        milvus_uri: str = "./chroma_zhijian"
+        vector_persist_dir: str = None,
     ):
         """
         Initialize the Retriever.
 
         Args:
-            milvus_client: Optional ChromaVectorClient instance. If not provided,
-                           a new one will be created using milvus_uri.
+            vector_client: Optional ChromaVectorClient instance. If not provided,
+                           a new one will be created using vector_persist_dir.
+                           (历史命名：曾叫 milvus_client，实际是 ChromaDB)
             embedder: Optional callable that takes a string query and returns
                      a list of floats (embedding vector). If not provided,
                      BM25-only search will be used.
-            milvus_uri: Path for ChromaDB database (used if milvus_client not provided).
+            vector_persist_dir: Path for ChromaDB database (used if vector_client
+                           not provided). 默认从 app.config 读取。
         """
-        self.milvus_client = milvus_client or ChromaVectorClient(persist_directory=milvus_uri)
+        from .. import config as app_config
+        if vector_persist_dir is None:
+            vector_persist_dir = str(app_config.CHROMA_PERSIST_DIR)
+        self.vector_client = vector_client or ChromaVectorClient(persist_directory=vector_persist_dir)
         self.embedder = embedder
         # Per-collection BM25 data storage using defaultdict
         self._bm25_data = defaultdict(lambda: {
@@ -191,8 +196,8 @@ class Retriever:
         bm25_index = self._bm25_data[collection]["index"]
         if bm25_index is None or not self._bm25_data[collection]["texts"]:
             try:
-                if self.milvus_client.has_collection(collection):
-                    col = self.milvus_client.get_collection(collection)
+                if self.vector_client.has_collection(collection):
+                    col = self.vector_client.get_collection(collection)
                     count = col.count()
                     if count > 0:
                         logger.info(f"Rebuilding BM25 index from ChromaDB for collection '{collection}' ({count} items)")
@@ -208,7 +213,7 @@ class Retriever:
         if query_vector is not None:
             # Use pre-computed query vector
             try:
-                vector_results = self.milvus_client.search(
+                vector_results = self.vector_client.search(
                     collection_name=collection,
                     query_vector=query_vector,
                     top_k=top_k * 2  # Get more for better fusion
@@ -220,7 +225,7 @@ class Retriever:
             # Compute query vector using embedder
             try:
                 query_vector = self.embedder(query)
-                vector_results = self.milvus_client.search(
+                vector_results = self.vector_client.search(
                     collection_name=collection,
                     query_vector=query_vector,
                     top_k=top_k * 2  # Get more for better fusion
@@ -413,7 +418,7 @@ class Retriever:
             raise ValueError("Embedder not provided for vector search")
 
         query_vector = self.embedder(query)
-        results = self.milvus_client.search(
+        results = self.vector_client.search(
             collection_name=collection,
             query_vector=query_vector,
             top_k=top_k

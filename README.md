@@ -27,16 +27,16 @@
 - Neo4j 知识图谱人物关系挖掘与可视化
 - 基于 RAG 的古籍智能问答
 
-> **构建方式**：本项目由 Claude Code Agent 驱动构建，零手动编码，三次 git 提交完成从架构设计到可运行系统的全部交付。系统通过 8 阶段长链推理管道（OCR → BERT 语义校勘 → 知识图谱 → RAG 问答），将一部地方志的端到端数字化整理从 3-5 年压缩到数天。核心校勘采用 BERT 语义编码 + Needleman-Wunsch 全局对齐，知识图谱构建采用「规则引擎打底 + Qwen2.5-3B 本地 LLM 增强」的双重抽取策略，解决了古文 NER 冷启动难题。覆盖 5 个历史版本、974,139 字符真实方志数据，113 个源文件、~40,000 行代码、30+ 工具脚本，由 hbusl 与 Claude 协作完成。
+> **构建方式**：本项目由 Claude Code Agent 驱动构建，零手动编码。**精简版三大模块**——OCR 古籍识别、知识图谱、RAG 智能问答——端到端打通。OCR 基于 EasyOCR + 1000+ 异体字映射 + 清代避讳规则，识别扫描件并标注异体；知识图谱采用「规则引擎打底 + Qwen2.5-3B 本地 LLM 增强」的双重抽取策略，解决了古文 NER 冷启动难题；RAG 问答走「BGE 向量 + BM25 + RRF 融合 + Qwen2.5-3B」四步检索增强链路。覆盖 5 个历史版本、974,139 字符真实方志数据，由 hbusl 与 Claude 协作完成。
 
 ### 核心指标
 
 | 指标 | 数值 | 说明 |
 |------|------|------|
 | OCR 识别速度 | ~10 秒/页 | CPU 模式，GPU 可加速 |
-| 端到端校勘耗时 | ~269 秒 | 含 BERT 语义编码 |
 | 已提取数据量 | 974,139 字符 | 98 年版固安县志 |
 | 支持版本数 | 5 个 | 康熙 / 咸丰 / 98年 / 民国 / 故宫 |
+| 异体字映射 | 1000+ 条 | 覆盖清代避讳与通假 |
 
 ---
 
@@ -47,23 +47,18 @@
 </p>
 
 ```
-古籍扫描件 → OCR识别 → 文本规范化 → 多版本校勘 → 知识图谱 → RAG问答
-                                    ↕
-                              辑佚 · 舆图 · 批校
+古籍扫描件 → OCR识别 ──┐
+                      ├→ 知识图谱 ──→ RAG问答
+                      └→ 直接入问答库
 ```
 
-### 8 大核心模块
+### 三大核心模块
 
 | # | 模块 | 核心技术 |
 |---|------|----------|
-| ① | **古籍 OCR 识别** | EasyOCR / PaddleOCR + 1000+ 异体字映射 + 清代避讳规则 |
-| ② | **文本规范化** | OpenCC 繁简转换 + BERT NER（PER/LOC/TIME/ORG/WORK） |
-| ③ | **多版本智能校勘** | BERT 语义编码 + Needleman-Wunsch 全局对齐 + 裁判规则引擎 |
-| ④ | **多源辑佚与去重** | MinHash 去重 + 版本评分排序 + 结构化融合 |
-| ⑤ | **舆图信息提取** | U-Net 语义分割 + 要素矢量化 + 地理坐标映射 |
-| ⑥ | **批校痕迹提取** | Faster R-CNN 检测 + 颜色/形状分类 + 文本对齐 |
-| ⑦ | **知识图谱** | Neo4j 图数据库 + Milvus 向量索引 + HNSW 检索 |
-| ⑧ | **RAG 智能问答** | BGE 向量化 + BM25 混合检索 + RRF 融合 + Ollama/Qwen2.5 |
+| ① | **OCR 古籍识别** | EasyOCR / PaddleOCR + 1000+ 异体字映射 + 清代避讳规则 + OpenCV 预处理 |
+| ② | **知识图谱** | 纯内存存储 + 正则/LLM 实体抽取 + ECharts 力导向可视化 |
+| ③ | **RAG 智能问答** | BGE 向量化 + BM25 混合检索 + RRF 融合 + Ollama/Qwen2.5 |
 
 ---
 
@@ -118,14 +113,13 @@ conda activate zhijian
 cd zhijian
 pip install -r requirements.txt
 
-# 启动 Docker 服务（Neo4j + Milvus，可选）
-cd docker && docker-compose up -d
-
 # 启动 API 服务
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 API 文档自动生成：http://localhost:8000/docs
+
+> 需要 RAG 生成式问答时，另启 Ollama：`ollama serve`（详见 [DEPLOY.md](DEPLOY.md)）
 
 ### 2. 前端
 
@@ -156,21 +150,26 @@ curl -X POST "http://localhost:8000/api/v1/rag/seed?data_dir=data/raw/1998&rebui
 
 | 端点 | 方法 | 模块 | 说明 |
 |------|------|------|------|
+| `/api/v1/health` | GET | 系统 | 健康检查 |
+| `/api/v1/status` | GET | 系统 | 模块状态与端点清单 |
+| `/api/v1/ocr/status` | GET | OCR | Provider / 模型就绪状态 |
 | `/api/v1/ocr/recognize` | POST | OCR | 上传图片进行 OCR 识别 |
-| `/api/v1/normalize` | POST | 规范化 | 繁简转换 + NER 实体识别 |
-| `/api/v1/collation/compare` | POST | 校勘 | 两版本对比校勘 |
-| `/api/v1/collation/compare-multi` | POST | 校勘 | 多版本对比（2-4版本） |
-| `/api/v1/collation/versions` | GET | 版本管理 | 列出已保存版本 |
-| `/api/v1/collation/versions/upload` | POST | 版本管理 | 上传版本文件 |
-| `/api/v1/compilation/compile` | POST | 辑佚 | 多源辑佚编译 |
-| `/api/v1/map/extract` | POST | 舆图 | 舆图要素提取 |
-| `/api/v1/annotation/extract` | POST | 批校 | 批校痕迹提取 |
-| `/api/v1/kg/collation-result` | POST | 知识图谱 | 校勘结果入图 |
-| `/api/v1/kg/graph` | GET | 知识图谱 | 图谱可视化数据 |
-| `/api/v1/kg/init` | POST | 知识图谱 | 初始化人物图谱 |
+| `/api/v1/ocr/batch` | POST | OCR | 批量识别（≤10 张） |
+| `/api/v1/ocr/variants` | GET | OCR | 异体字映射表（1000+ 条） |
+| `/api/v1/ocr/samples` | GET | OCR | 列出样本图（kangxi 页） |
+| `/api/v1/ocr/samples/{filename}` | GET | OCR | 直出样本图 PNG |
+| `/api/v1/kg/status` | GET | KG | 图谱就绪状态 |
+| `/api/v1/kg/persons` | GET | KG | 人物列表 |
+| `/api/v1/kg/persons/{name}` | GET | KG | 人物详情 |
+| `/api/v1/kg/graph` | GET | KG | 图谱可视化数据 |
+| `/api/v1/kg/init` | POST | KG | 初始化人物图谱 |
+| `/api/v1/kg/extract/preview` | POST | KG | 文本→候选实体/关系（不入库） |
+| `/api/v1/kg/entity` | POST | KG | 手动新增实体 |
+| `/api/v1/kg/relate` | POST | KG | 手动新增关系 |
 | `/api/v1/rag/ask` | POST | RAG | 古籍智能问答 |
 | `/api/v1/rag/ingest` | POST | RAG | 文档摄入 |
-| `/api/v1/health` | GET | 系统 | 健康检查 |
+| `/api/v1/rag/seed` | POST | RAG | 灌入知识库（默认 1998 版） |
+| `/api/v1/rag/status` | GET | RAG | 知识库就绪状态 |
 
 ---
 
@@ -180,25 +179,18 @@ curl -X POST "http://localhost:8000/api/v1/rag/seed?data_dir=data/raw/1998&rebui
 zhijian/
 ├── app/
 │   ├── main.py                # FastAPI 入口
-│   ├── api/routes.py          # API 路由（~1900行）
-│   ├── ocr/                   # ① OCR 识别
-│   ├── normalize/             # ② 文本规范化
-│   ├── collation/             # ③ 多版本校勘（核心）
-│   ├── compilation/           # ④ 多源辑佚
-│   ├── entity_resolution/     #    实体消解
-│   ├── map_extraction/        # ⑤ 舆图提取
-│   ├── annotation_extract/    # ⑥ 批校提取
-│   ├── database/              # ⑦ 知识图谱
-│   ├── rag/                   # ⑧ RAG 问答
-│   ├── kg/                    #    KG 构建流水线
+│   ├── api/routes.py          # API 路由（~700行）
+│   ├── ocr/                   # ① OCR 识别（含 providers/）
+│   ├── database/              # ② 知识图谱存储（kg_service, chroma_client）
+│   ├── rag/                   # ③ RAG 问答（chunker, embedder, retriever, generator）
+│   ├── kg/                    #    KG 抽取 pipeline
 │   └── llm/                   #    LLM 客户端
 ├── frontend/                  # Vue3 前端
-│   └── src/views/             # 7 个视图组件
-├── docker/                    # Docker Compose
-├── scripts/                   # 工具脚本（30+）
+│   └── src/views/             # 4 个视图：Home, OCR, Knowledge, QA
+├── scripts/                   # 工具脚本
 ├── tests/                     # 测试
 ├── docs/                      # 文档与截图
-├── requirements.txt           # Python 依赖
+├── requirements.txt           # Python 依赖（OCR 走 extras 装）
 └── CLAUDE.md                  # 项目约定
 ```
 
@@ -209,30 +201,38 @@ zhijian/
 | 层次 | 技术 | 说明 |
 |------|------|------|
 | 后端框架 | FastAPI 0.109 | 高性能异步 API |
-| OCR 引擎 | EasyOCR 1.7 / PaddleOCR 2.7 | 双引擎切换 |
-| 深度学习 | PyTorch 2.1 + Transformers 4.37 | BERT / BGE / U-Net / Faster R-CNN |
-| NLP 模型 | bert-base-chinese | 语义编码 + NER |
-| 向量化 | BGE bge-base-chinese-v1.5 | 768 维嵌入 |
-| 图数据库 | Neo4j 5.12 | 人物关系图谱 |
-| 向量数据库 | Milvus / ChromaDB | 语义检索 |
-| 繁简转换 | OpenCC 0.1.7 | 支持多种中文变体 |
+| OCR 引擎 | EasyOCR 1.7（主力）/ PaddleOCR 2.7（备选） | 双引擎切换，extras 装 |
+| 图像处理 | OpenCV 4.9 | 灰度/二值化/降噪/旋转矫正 |
+| NLP 模型 | bert-base-chinese + BGE bge-base-chinese-v1.5 | 768 维嵌入 + NER |
+| 向量数据库 | ChromaDB | 持久化在 `chroma_zhijian/` |
 | 前端框架 | Vue 3.4 + Vite 5 | 组合式 API |
 | UI 组件 | Element Plus 2.5 | Vue3 组件库 |
 | 可视化 | ECharts 5.5 | 知识图谱力导向图 |
 | LLM | Ollama + Qwen2.5:3B | 本地部署，中文优化 |
-| 容器化 | Docker Compose | Neo4j + Milvus + etcd + MinIO |
 
 ---
 
 ## 开发进度
 
-| # | 模块 | 状态 | 完成度 |
-|---|------|------|--------|
-| ① | OCR 识别 | 完成 | variant_map (1000+)、预处理、识别器 |
-| ② | 文本规范化 | 完成 | OpenCC、BERT NER |
-| ③ | 多版本校勘 | 完成 | NW 对齐、差异检测、裁判规则 |
-| ④ | 多源辑佚 | 完成 | MinHash 去重、版本排序、融合 |
-| ⑤ | 舆图提取 | 框架完成 | U-Net 模型待训练 |
-| ⑥ | 批校提取 | 框架完成 | Faster R-CNN 模型待训练 |
-| ⑦ | 知识图谱 | 完成 | Neo4j + in-memory 回退 |
-| ⑧ | RAG 问答 | 完成 | 混合检索 + Ollama 本地部署 |
+| # | 模块 | 状态 |
+|---|------|------|
+| ① | OCR 古籍识别 | 完成：RapidOCR（默认）+ Aliyun OCR（高精度）+ 1000+ 异体字 + 预处理 + 批量 + 样本图 |
+| ② | 知识图谱 | 完成：纯内存存储 + 实体/关系抽取 + ECharts 可视化 |
+| ③ | RAG 智能问答 | 完成：BGE + BM25 + RRF 融合 + Ollama + Qwen2.5-3B |
+
+---
+
+## 部署到服务器
+
+完整部署手册见 [DEPLOY.md](DEPLOY.md)。快速流程：
+
+```bash
+# 1. 上传部署包到服务器
+scp -r zhijian_deploy/ user@SERVER_IP:/root/zhijian_deploy/
+
+# 2. 一键部署（含 Ollama + Qwen2.5-3B）
+cd /root/zhijian_deploy
+SERVER_IP=8.218.131.76 sudo -E bash deploy.sh
+```
+
+部署栈：**Nginx + systemd + Ollama（Qwen2.5-3B 本地）**。

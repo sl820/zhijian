@@ -10,6 +10,12 @@
         <span v-if="sources.length > 0" class="source-count">
           {{ sources.length }} 条参考来源
         </span>
+        <button v-if="messages.length > 0" class="btn-export" @click="exportChat" title="导出对话为 Markdown">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          导出
+        </button>
         <button class="btn-clear" @click="clearChat">清空对话</button>
       </div>
     </header>
@@ -44,7 +50,7 @@
               <span>智</span>
             </div>
             <div class="msg-body">
-              <div class="msg-content" v-html="renderMarkdown(msg.content)"></div>
+              <div class="msg-content" v-html="renderMarkdown(msg.content, msg.role === 'assistant' ? lastQuestion : '')"></div>
               <div class="msg-meta">
                 <span class="msg-time">{{ msg.time }}</span>
                 <button v-if="msg.role === 'user'" class="btn-copy" @click="copyMessage(msg.content)" title="复制">
@@ -200,6 +206,7 @@ const isInitializing = ref(false)
 const embedderInfo = ref(null)
 const embeddingDimension = ref(null)
 const exampleQuestions = ref(EXAMPLE_QUESTIONS)
+const lastQuestion = ref('')
 
 const ragStatusConfig = {
   ready: { statusClass: 'ready', label: '已就绪' },
@@ -213,6 +220,7 @@ const currentStatusConfig = computed(() =>
 )
 
 onMounted(async () => {
+  loadHistory()
   await checkRAGStatus()
   if (messages.value.length === 0) {
     messages.value.push({
@@ -281,11 +289,13 @@ async function sendQuestion() {
 
   const q = question.value.trim()
   messages.value.push({ role: 'user', content: q, time: formatTime(new Date()) })
+  lastQuestion.value = q
   question.value = ''
   loading.value = true
   sources.value = []
   autoResize()
   await scrollToBottom()
+  saveHistory()
 
   try {
     const res = await ragAPI.ask(q)
@@ -305,6 +315,7 @@ async function sendQuestion() {
     ElMessage.error('问答服务暂时不可用')
   } finally {
     loading.value = false
+    saveHistory()
     await scrollToBottom()
     autoResize()
     inputRef.value?.focus()
@@ -329,6 +340,67 @@ function clearChat() {
     time: formatTime(new Date())
   }]
   sources.value = []
+  saveHistory()
+}
+
+const HISTORY_KEY = 'zhijian_qa_history'
+const HISTORY_MAX = 200
+
+function saveHistory() {
+  try {
+    const trimmed = messages.value.slice(-HISTORY_MAX)
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed))
+  } catch (e) {
+    console.warn('保存对话历史失败', e)
+  }
+}
+
+function loadHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      messages.value = parsed
+    }
+  } catch (e) {
+    console.warn('读取对话历史失败', e)
+  }
+}
+
+function exportChat() {
+  if (messages.value.length === 0) return
+  const lines = ['# 志鉴智能问答 - 对话记录', '']
+  lines.push(`导出时间：${new Date().toLocaleString('zh-CN')}`)
+  lines.push('')
+  messages.value.forEach((m, i) => {
+    const role = m.role === 'user' ? '🙋 用户' : '🤖 智鉴'
+    lines.push(`## ${i + 1}. ${role}　·　${m.time}`)
+    lines.push('')
+    lines.push(m.content)
+    lines.push('')
+  })
+  if (sources.value.length > 0) {
+    lines.push('---')
+    lines.push('')
+    lines.push('## 参考来源')
+    lines.push('')
+    sources.value.forEach((s, i) => {
+      lines.push(`[${i + 1}] ${s.source}　·　相关度 ${(s.score * 100).toFixed(0)}%`)
+      lines.push(`> ${s.text}`)
+      lines.push('')
+    })
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `志鉴对话-${new Date().toISOString().slice(0, 10)}.md`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  ElMessage.success('对话已导出')
 }
 
 async function copyMessage(content) {
@@ -360,7 +432,7 @@ function autoResize() {
   })
 }
 
-function renderMarkdown(text) {
+function renderMarkdown(text, query = '') {
   if (!text) return ''
   let html = text
   html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -377,7 +449,29 @@ function renderMarkdown(text) {
   html = html.replace(/\n/g, '<br/>')
   html = `<p class="md-p">${html}</p>`
   html = html.replace(/<p class="md-p"><br\/><\/p>/g, '')
+
+  // 关键词高亮：用提问中的中文词在回答中以黄底标记（最多 8 个关键词，每个 2-6 字）
+  if (query) {
+    const keywords = extractKeywords(query)
+    keywords.forEach((kw) => {
+      if (kw.length < 2) return
+      const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const re = new RegExp(escaped, 'g')
+      html = html.replace(re, (m) => `<mark class="kw-hl">${m}</mark>`)
+    })
+  }
+
   return html
+}
+
+function extractKeywords(query) {
+  if (!query) return []
+  // 切出连续中文 2-6 字片段 + 引号内词
+  const cn = query.match(/[一-龥]{2,6}/g) || []
+  const qm = (query.match(/[「」『』"']([^「」『』"']{2,8})[「」『』"']/g) || [])
+    .map(s => s.slice(1, -1))
+  const all = [...new Set([...qm, ...cn])]
+  return all.slice(0, 8)
 }
 </script>
 
@@ -451,6 +545,26 @@ function renderMarkdown(text) {
 }
 
 .btn-clear:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-export {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition-fast);
+  font-family: var(--font-serif);
+}
+
+.btn-export:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -1030,6 +1144,15 @@ function renderMarkdown(text) {
 .msg-content :deep(.md-code-inline) { background: var(--bg-secondary); padding: 1px 5px; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 13px; color: var(--accent); }
 .msg-content :deep(.md-hr) { border: none; border-top: 1px dashed var(--border-medium); margin: 10px 0; }
 .message.user .msg-content :deep(.md-code-inline) { background: rgba(181, 74, 50, 0.15); color: var(--accent); }
+
+/* 关键词高亮（仅 assistant 消息） */
+.msg-content :deep(mark.kw-hl) {
+  background: rgba(229, 193, 88, 0.45);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 2px;
+  font-weight: 500;
+}
 
 /* ==================== 响应式 ==================== */
 @media (max-width: 1100px) {

@@ -12,6 +12,7 @@
             v-model="searchName"
             placeholder="搜索人物..."
             class="search-input"
+            @input="onSearchInput"
             @keyup.enter="searchPerson"
           />
           <button class="search-btn" @click="searchPerson">
@@ -59,8 +60,24 @@
             <!-- 空状态 -->
             <div v-if="kgEmpty" class="empty-state">
               <p class="empty-title">知识图谱为空</p>
-              <p class="empty-hint" v-if="!kgInitialized">点击右上角「初始化图谱」按钮开始构建</p>
+              <p class="empty-hint" v-if="initError">初始化失败，请重试</p>
+              <p class="empty-hint" v-else-if="!kgInitialized">点击右上角「初始化图谱」按钮开始构建</p>
               <p class="empty-hint" v-else>暂无图谱数据</p>
+              <button v-if="initError" class="btn-primary empty-retry" @click="initKG">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                  <polyline points="23 4 23 10 17 10"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+                重试初始化
+              </button>
+            </div>
+
+            <!-- 节点过多简化提示 -->
+            <div v-if="graphSimplified" class="simplify-banner">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              <span>节点数较多（{{ nodeCount }}），已自动简化力导向布局</span>
             </div>
 
             <!-- 统计 -->
@@ -101,7 +118,10 @@
         <!-- 详情面板 -->
         <el-col :span="8">
           <!-- 人物详情 -->
-          <div v-if="selectedPerson" class="person-card">
+          <div v-if="personLoading" class="person-card person-loading">
+            <el-skeleton :rows="6" animated />
+          </div>
+          <div v-else-if="selectedPerson" class="person-card">
             <div class="person-header">
               <div class="person-avatar" :style="{ borderColor: getCategoryColor(selectedPerson.category) }">
                 <span class="avatar-char" :style="{ color: getCategoryColor(selectedPerson.category) }">
@@ -120,6 +140,11 @@
                   <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                 </svg>
               </button>
+            </div>
+
+            <div v-if="personLoadError" class="person-warn">
+              <span>详情加载失败，仅显示图谱节点信息</span>
+              <button class="retry-btn" @click="searchPerson">重试</button>
             </div>
 
             <div class="person-info">
@@ -194,11 +219,17 @@ const chartRef = ref(null)
 const statsChartRef = ref(null)
 const searchName = ref('')
 const selectedPerson = ref(null)
+const personLoading = ref(false)
+const personLoadError = ref(false)
 const initializing = ref(false)
 const kgInitialized = ref(false)
+const initError = ref(false)
+const graphSimplified = ref(false)
 
 let chart = null
 let statsChart = null
+let resizeHandler = null
+let searchDebounceTimer = null
 
 const categories = [
   { name: '苏氏家族', color: '#6b8f8a', symbol: '氏' },
@@ -226,8 +257,18 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (resizeHandler) {
+    window.removeEventListener('resize', resizeHandler)
+    resizeHandler = null
+  }
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+    searchDebounceTimer = null
+  }
   if (chart) chart.dispose()
   if (statsChart) statsChart.dispose()
+  chart = null
+  statsChart = null
 })
 
 function getNodeRelations(nodeName) {
@@ -243,10 +284,11 @@ function initChart() {
   if (!chartRef.value) return
   chart = echarts.init(chartRef.value)
 
-  // Handle window resize
-  window.addEventListener('resize', () => {
+  // Handle window resize (save reference for cleanup)
+  resizeHandler = () => {
     if (chart) chart.resize()
-  })
+  }
+  window.addEventListener('resize', resizeHandler)
 
   chart.on('click', async (params) => {
     if (params.dataType === 'node') {
@@ -256,6 +298,8 @@ function initChart() {
 
       const base = { ...node, relations: getNodeRelations(nodeName) }
       selectedPerson.value = base
+      personLoading.value = true
+      personLoadError.value = false
 
       try {
         const res = await kgAPI.getPerson(nodeName)
@@ -264,6 +308,9 @@ function initChart() {
         }
       } catch (e) {
         console.warn('获取人物详情失败:', e)
+        personLoadError.value = true
+      } finally {
+        personLoading.value = false
       }
     }
   })
@@ -272,6 +319,7 @@ function initChart() {
 async function initKG() {
   if (initializing.value || kgInitialized.value) return
   initializing.value = true
+  initError.value = false
   try {
     // 使用后台模式启动初始化
     const res = await kgAPI.initKG(false, true)
@@ -287,6 +335,7 @@ async function initKG() {
   } catch (e) {
     console.error('KG初始化失败:', e)
     ElMessage.error('知识图谱初始化失败：' + (e.message || '未知错误'))
+    initError.value = true
   } finally {
     initializing.value = false
   }
@@ -302,6 +351,7 @@ async function pollInitStatus() {
       if (status.completed) {
         if (status.error) {
           ElMessage.error('知识图谱初始化失败：' + status.error)
+          initError.value = true
           return
         }
         if (status.result) {
@@ -318,6 +368,7 @@ async function pollInitStatus() {
     }
   }
   ElMessage.warning('知识图谱初始化超时，请稍后刷新页面')
+  initError.value = true
 }
 
 async function loadGraph() {
@@ -336,8 +387,11 @@ async function loadGraph() {
     console.error('加载图谱失败:', e)
     kgGraphData.value = { nodes: [], links: [] }
     kgInitialized.value = false
+    ElMessage.error('图谱加载失败：' + (e.message || '未知错误'))
     return
   }
+
+  graphSimplified.value = kgGraphData.value.nodes.length > 200
 
   const nodes = kgGraphData.value.nodes
   const links = kgGraphData.value.links
@@ -411,10 +465,10 @@ async function loadGraph() {
       })),
       categories: categories.map(c => ({ name: c.name, itemStyle: { color: c.color } })),
       force: {
-        repulsion: 180,
-        edgeLength: 100,
-        gravity: 0.08,
-        layoutAnimation: true,
+        repulsion: graphSimplified.value ? 60 : 180,
+        edgeLength: graphSimplified.value ? 50 : 100,
+        gravity: graphSimplified.value ? 0.15 : 0.08,
+        layoutAnimation: !graphSimplified.value,
         friction: 0.9
       },
       scaleLimit: { min: 0.3, max: 3 },
@@ -471,12 +525,17 @@ async function searchPerson() {
 
   const base = { ...person, relations: getNodeRelations(person.name) }
   selectedPerson.value = base
+  personLoading.value = true
+  personLoadError.value = false
 
   try {
     const res = await kgAPI.getPerson(person.name)
     if (res.person) selectedPerson.value = { ...base, ...res.person }
   } catch (e) {
     console.warn('获取人物详情失败:', e)
+    personLoadError.value = true
+  } finally {
+    personLoading.value = false
   }
 
   if (chart) {
@@ -486,6 +545,15 @@ async function searchPerson() {
       dataIndex: kgGraphData.value.nodes.findIndex(n => n.name === person.name)
     })
   }
+}
+
+function onSearchInput() {
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  const q = searchName.value.trim()
+  if (!q || q.length < 2) return
+  searchDebounceTimer = setTimeout(() => {
+    searchPerson()
+  }, 400)
 }
 
 function focusNode(name) {
@@ -697,6 +765,10 @@ function refreshGraph() { loadGraph() }
   align-items: center;
   justify-content: center;
   gap: 12px;
+}
+
+.empty-retry {
+  margin-top: 8px;
 }
 
 .empty-title {
@@ -950,6 +1022,40 @@ function refreshGraph() { loadGraph() }
   margin: 0;
 }
 
+.person-loading {
+  padding: 24px 16px;
+}
+
+.person-warn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 16px 12px;
+  padding: 8px 12px;
+  background: rgba(201, 169, 110, 0.12);
+  border: 1px solid rgba(201, 169, 110, 0.3);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.retry-btn {
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  padding: 3px 10px;
+  font-size: 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: 'Noto Serif SC', serif;
+  transition: background 0.2s ease;
+}
+
+.retry-btn:hover {
+  background: rgba(181, 74, 50, 0.06);
+}
+
 /* ==================== 详情卡片 ==================== */
 .detail-card {
   background: var(--bg-card);
@@ -1017,6 +1123,23 @@ function refreshGraph() { loadGraph() }
 
 .stats-chart {
   height: 150px;
+}
+
+/* 节点过多简化提示 */
+.simplify-banner {
+  position: absolute;
+  top: 56px;
+  left: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(201, 169, 110, 0.16);
+  border: 1px solid rgba(201, 169, 110, 0.4);
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  z-index: 5;
 }
 
 /* ==================== 响应式 ==================== */

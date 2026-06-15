@@ -19,7 +19,10 @@ class ChromaVectorClient:
     ChromaDB is a lightweight vector database that works locally without Docker.
     """
 
-    def __init__(self, persist_directory: str = "./chroma_zhijian"):
+    def __init__(self, persist_directory: str = None):
+        from .. import config as app_config
+        if persist_directory is None:
+            persist_directory = str(app_config.CHROMA_PERSIST_DIR)
         self.persist_directory = persist_directory
         self.client = chromadb.PersistentClient(path=persist_directory)
         self._collections = {}

@@ -11,18 +11,20 @@ import urllib.request
 import urllib.error
 from typing import List, Dict, Optional
 
+from .. import config as app_config
+
 logger = logging.getLogger(__name__)
 
 # Lazy-initialized global instance
 _llm_instance: Optional["OllamaClient"] = None
 
-# Default configuration
+# Default configuration (read from app.config — env-overridable)
 DEFAULT_CONFIG = {
-    "base_url": "http://localhost:11434",
-    "model": "qwen2.5:3b",  # 阿里通义千问，中文支持优秀
-    "temperature": 0.3,
-    "max_tokens": 2048,
-    "timeout": 120,
+    "base_url": app_config.OLLAMA_BASE_URL,
+    "model": app_config.LLM_MODEL,
+    "temperature": app_config.LLM_TEMPERATURE,
+    "max_tokens": app_config.LLM_MAX_TOKENS,
+    "timeout": app_config.LLM_TIMEOUT,
 }
 
 
@@ -32,26 +34,39 @@ class OllamaClient:
 
     通过 REST API 调用本地 Ollama 服务
     支持多轮对话和单轮生成
+
+    注：连接检查改为非致命。`is_available()` 探测实时状态；
+    `generate()` / `chat()` 在不可用时返回明确的错误字符串，
+    由调用方（Generator）决定如何处理。
     """
 
     def __init__(self, config: Optional[Dict] = None):
         self.config = {**DEFAULT_CONFIG, **(config or {})}
 
-        self._base_url = self.config.get("base_url", "http://localhost:11434")
-        self._model = self.config.get("model") or DEFAULT_CONFIG.get("model", "qwen2.5:3b")
-        self._temperature = float(self.config.get("temperature", 0.3))
-        self._max_tokens = int(self.config.get("max_tokens", 2048))
-        self._timeout = int(self.config.get("timeout", 120))
+        self._base_url = self.config.get("base_url", app_config.OLLAMA_BASE_URL)
+        self._model = self.config.get("model") or app_config.LLM_MODEL
+        self._temperature = float(self.config.get("temperature", app_config.LLM_TEMPERATURE))
+        self._max_tokens = int(self.config.get("max_tokens", app_config.LLM_MAX_TOKENS))
+        self._timeout = int(self.config.get("timeout", app_config.LLM_TIMEOUT))
 
-        # 验证服务可用性
-        if not self._check_connection():
-            raise ConnectionError(
-                f"Ollama 服务未运行或无法连接: {self._base_url}\n"
-                f"请先安装并启动 Ollama: https://ollama.com/download\n"
-                f"启动命令: ollama serve"
+        # 探测一次，记录当前可用性（不抛错）
+        self._available = self._check_connection()
+        if self._available:
+            logger.info(f"OllamaClient 初始化完成: model={self._model}, url={self._base_url}")
+        else:
+            logger.warning(
+                f"Ollama 服务不可达: {self._base_url} — 调用将返回错误字符串。"
+                f"请先安装并启动 Ollama: https://ollama.com/download ; ollama serve"
             )
 
-        logger.info(f"OllamaClient 初始化完成: model={self._model}, url={self._base_url}")
+    def is_available(self) -> bool:
+        """重新探测 Ollama 服务可用性（每次实时探测，方便重连）"""
+        self._available = self._check_connection()
+        return self._available
+
+    @property
+    def model(self) -> str:
+        return self._model
 
     def _check_connection(self) -> bool:
         """检查 Ollama 服务是否可用"""

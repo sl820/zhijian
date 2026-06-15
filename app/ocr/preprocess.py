@@ -148,16 +148,27 @@ class ImagePreprocessor:
         logger.info(f"Detected skew angle: {median_angle:.2f} degrees")
         return median_angle
 
-    def deskew(self, binary_image: np.ndarray, angle: float) -> np.ndarray:
+    def deskew(self, binary_image: np.ndarray, angle: float = None) -> np.ndarray:
         """Deskew the binary image by rotating by the given angle.
 
         Args:
             binary_image: Binary image to deskew.
-            angle: Skew angle in degrees.
+            angle: Skew angle in degrees. If None, auto-detect via detect_skew_angle().
 
         Returns:
             Deskewed binary image.
         """
+        # 任何实际倾斜都在 ±15° 之内；超出此范围的检测结果视为噪声
+        # （竖排古籍的文本列容易被 Hough 误判为 -90° 倾斜，必须截断）
+        MAX_DESKEW_ANGLE = 15.0
+
+        if angle is None:
+            angle = self.detect_skew_angle(binary_image)
+
+        if abs(angle) < 0.5 or abs(angle) > MAX_DESKEW_ANGLE:
+            logger.info(f"Skipping deskew: angle {angle:.2f}° out of safe range (±{MAX_DESKEW_ANGLE}°)")
+            return binary_image
+
         logger.info(f"Deskewing image with angle: {angle:.2f} degrees")
 
         height, width = binary_image.shape[:2]

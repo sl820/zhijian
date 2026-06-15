@@ -1,14 +1,14 @@
 """
 知识图谱构建 Pipeline
-从 OCR 文本 → NER 实体识别 → 关系抽取 → 实体消解 → 存储到 Neo4j
+从文本 → 规则实体识别 → 关系抽取 → 存到 KnowledgeGraphService（in-memory）
+
+注：原版本使用 NERModel（BERT）和 EntityResolver（TF-IDF），
+    重构后两者均删除，改用纯规则+LLM 辅助。
 """
 import logging
 import re
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
-
-from ..normalize.ner_model import NERModel
-from ..entity_resolution.resolver import EntityResolver
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +72,6 @@ class KGPipeline:
         self.ner_threshold = self.config.get("ner_threshold", 0.5)
         self.relation_threshold = self.config.get("relation_threshold", 0.6)
         self.default_person_type = self.config.get("person_type", 2)
-
-        self.ner_model = NERModel()
-        self.entity_resolver = EntityResolver(self.config.get("resolver", {}))
 
         logger.info(
             f"KGPipeline 初始化完成 - "
@@ -622,21 +619,27 @@ class KGPipeline:
         }
 
     def _resolve_entities(self, entities: List[Dict]) -> List[Dict]:
-        """对实体列表进行消解，去除重复"""
+        """对实体列表进行消解，去除重复。
+
+        重构后：使用简单的 dict 去重（按 name + type），不再依赖 EntityResolver。
+        复杂的别名合并交给 post_process_relations 在存储阶段处理。
+        """
         if len(entities) <= 1:
             return entities
 
         try:
-            clusters = self.entity_resolver.cluster_entities(entities)
-            resolved = []
-            for cluster in clusters:
-                if len(cluster) == 1:
-                    resolved.append(cluster[0])
+            seen: Dict[Tuple[str, str], Dict] = {}
+            for e in entities:
+                key = (e.get("name", ""), e.get("type", ""))
+                if key not in seen:
+                    seen[key] = e
                 else:
-                    # 合并同类实体
-                    merged = self._merge_entity_cluster(cluster)
-                    resolved.append(merged)
-            return resolved
+                    # 合并 biography（取较长者）
+                    existing_bio = seen[key].get("biography", "")
+                    new_bio = e.get("biography", "")
+                    if len(new_bio) > len(existing_bio):
+                        seen[key]["biography"] = new_bio
+            return list(seen.values())
         except Exception as e:
             logger.warning(f"实体消解失败: {e}，返回原始实体")
             return entities

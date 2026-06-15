@@ -8,14 +8,11 @@
           <h1 class="hero-title">志鉴</h1>
           <p class="hero-subtitle">数字时代的古籍书房</p>
           <p class="hero-desc">
-            融合 OCR 识别、深度学习与知识图谱技术，<br/>
-            实现古籍方志的数字化采集、智能校勘与知识挖掘。
+            基于 OCR 古籍识别、检索增强生成（RAG）与知识图谱（KG）三大核心能力，<br/>
+            让古方志可识别、可检索、可问答、可探索。
           </p>
           <div class="hero-actions">
-            <el-button type="primary" size="large" @click="$router.push('/collation')">
-              开始校勘
-            </el-button>
-            <el-button size="large" @click="$router.push('/qa')">
+            <el-button type="primary" size="large" @click="$router.push('/qa')">
               智能问答
             </el-button>
             <el-button size="large" @click="$router.push('/knowledge')">
@@ -39,7 +36,7 @@
         <div class="section-header">
           <div class="section-title-group">
             <h2 class="section-title">核心模块</h2>
-            <p class="section-desc">完整覆盖古籍方志数字化的全流程处理</p>
+            <p class="section-desc">聚焦 OCR、RAG、KG 三个端到端可用的核心能力</p>
           </div>
         </div>
 
@@ -48,7 +45,7 @@
             v-for="(mod, idx) in modules"
             :key="mod.id"
             class="module-card animate-fade-in-up"
-            :class="[`stagger-${idx + 1}`, { completed: mod.status === 'completed' }]"
+            :class="[`stagger-${idx + 1}`]"
             @click="$router.push(mod.path)"
           >
             <div class="module-accent"></div>
@@ -58,39 +55,18 @@
             <div class="module-body">
               <h3 class="module-title">{{ mod.name }}</h3>
               <p class="module-desc">{{ mod.description }}</p>
+              <div class="module-techs">
+                <el-tag
+                  v-for="t in mod.technologies"
+                  :key="t"
+                  size="small"
+                  effect="plain"
+                  class="tech-tag"
+                >{{ t }}</el-tag>
+              </div>
             </div>
             <div class="module-badge">
-              <span v-if="mod.status === 'completed'" class="badge badge-success">已完成</span>
-              <span v-else class="badge badge-warning">开发中</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 县志数据 -->
-    <section class="section section-alt">
-      <div class="section-inner">
-        <div class="section-header">
-          <div class="section-title-group">
-            <h2 class="section-title">县志数据</h2>
-            <p class="section-desc">多个历史版本的方志文献资源</p>
-          </div>
-        </div>
-
-        <div class="versions-grid">
-          <div v-for="ver in versions" :key="ver.id" class="version-card animate-fade-in-up">
-            <div class="version-seal"></div>
-            <div class="version-year">{{ ver.year }}</div>
-            <h4 class="version-name">{{ ver.name }}</h4>
-            <p class="version-desc">{{ ver.description }}</p>
-            <div class="version-footer">
-              <span class="version-status" :class="ver.status">
-                {{ ver.status === 'completed' ? '已完成' : ver.status === 'partial' ? '部分完成' : '待处理' }}
-              </span>
-              <span v-if="ver.characterCount" class="version-chars">
-                {{ formatNumber(ver.characterCount) }} 字
-              </span>
+              <span class="badge badge-success">已完成</span>
             </div>
           </div>
         </div>
@@ -98,12 +74,12 @@
     </section>
 
     <!-- 技术架构 -->
-    <section class="section">
+    <section class="section section-alt">
       <div class="section-inner">
         <div class="section-header">
           <div class="section-title-group">
             <h2 class="section-title">技术架构</h2>
-            <p class="section-desc">现代化 AI 技术栈支撑智能化处理</p>
+            <p class="section-desc">现代化 AI 技术栈，无外部数据库依赖</p>
           </div>
         </div>
 
@@ -164,52 +140,43 @@
 import { ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useAppStore } from '@/stores/app'
-import { MODULES, TECH_STACK, GAZETTEER_VERSIONS, PROJECT_STATS } from '@/constants'
+import { MODULES, TECH_STACK, PROJECT_STATS } from '@/constants'
 
 const appStore = useAppStore()
 const { apiStatus, moduleStatus } = storeToRefs(appStore)
 
-const modules = ref(MODULES.map((m, i) => ({
+const modules = ref(MODULES.map(m => ({
   ...m,
-  icon: getModuleIcon(m.id),
-  status: m.status || (i < 4 ? 'completed' : 'dev')
+  icon: getModuleIcon(m.id)
 })))
 
 function getModuleIcon(id) {
   const icons = {
-    ocr: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>',
-    normalize: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
-    collation: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
-    map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>',
-    annotation: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+    ocr: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>',
     kg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="5" r="2"/><line x1="12" y1="9" x2="12" y2="5"/></svg>',
-    rag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
-    compilation: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>'
+    rag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'
   }
-  return icons[id] || icons.ocr
+  return icons[id] || icons.kg
 }
 
 const heroStats = [
-  { value: String(PROJECT_STATS.totalVersions), label: '版本数据' },
   { value: formatNumber(PROJECT_STATS.totalCharacters), label: '已提取字符' },
-  { value: '8', label: '核心模块' },
-  { value: '5', label: '历史版本' }
+  { value: String(PROJECT_STATS.totalCorpusFiles), label: '语料文件' },
+  { value: String(PROJECT_STATS.moduleCount), label: '核心模块' }
 ]
 
-const versions = ref(GAZETTEER_VERSIONS)
-
 const techLabels = {
-  backend: '后端技术',
-  database: '数据库',
-  frontend: '前端技术',
-  infra: '基础设施'
+  backend: '后端框架',
+  ocr: 'OCR 识别',
+  rag: 'RAG 检索',
+  kg: 'KG 抽取',
+  frontend: '前端技术'
 }
 
 const moduleLabels = {
   ocr: 'OCR 识别',
-  normalize: '文本规范',
-  collation: '多版本校勘',
-  rag: 'RAG 问答'
+  rag: 'RAG 问答',
+  kg: '知识图谱'
 }
 
 function formatNumber(num) {
@@ -302,9 +269,9 @@ async function checkStatus() {
 
 .hero-stats {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr;
   gap: var(--space-md);
-  width: 300px;
+  width: 260px;
   opacity: 0;
 }
 
@@ -395,7 +362,7 @@ async function checkStatus() {
 /* ==================== 模块网格 ==================== */
 .modules-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--space-lg);
 }
 
@@ -451,7 +418,7 @@ async function checkStatus() {
 
 .module-title {
   font-family: var(--font-display);
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 400;
   color: var(--text-primary);
   margin: 0 0 6px;
@@ -461,9 +428,20 @@ async function checkStatus() {
 .module-desc {
   font-size: 13px;
   color: var(--text-secondary);
-  margin: 0;
+  margin: 0 0 12px;
   line-height: 1.6;
   font-family: var(--font-serif);
+}
+
+.module-techs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tech-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .module-badge {
@@ -484,96 +462,10 @@ async function checkStatus() {
   color: var(--success);
 }
 
-.badge-warning {
-  background: var(--warning-bg);
-  color: var(--warning);
-}
-
-/* ==================== 版本网格 ==================== */
-.versions-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: var(--space-md);
-}
-
-.version-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg);
-  padding: var(--space-xl);
-  transition: var(--transition-normal);
-  position: relative;
-  opacity: 0;
-}
-
-.version-card:hover {
-  border-color: var(--border-medium);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
-}
-
-.version-seal {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 20px;
-  height: 20px;
-  border: 2px solid var(--accent);
-  border-radius: 50%;
-  opacity: 0.3;
-}
-
-.version-year {
-  font-family: var(--font-display);
-  font-size: 28px;
-  font-weight: 400;
-  color: var(--accent);
-  margin-bottom: 8px;
-  letter-spacing: 0.05em;
-}
-
-.version-name {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-primary);
-  margin: 0 0 6px;
-  font-family: var(--font-serif);
-}
-
-.version-desc {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin: 0 0 12px;
-  line-height: 1.5;
-  font-family: var(--font-serif);
-}
-
-.version-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.version-status {
-  font-size: 12px;
-  font-weight: 500;
-  font-family: var(--font-serif);
-}
-
-.version-status.completed { color: var(--success); }
-.version-status.partial { color: var(--warning); }
-.version-status.pending { color: var(--text-muted); }
-
-.version-chars {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
-
 /* ==================== 技术栈 ==================== */
 .tech-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: var(--space-lg);
 }
 
@@ -693,13 +585,9 @@ async function checkStatus() {
 }
 
 .stagger-1 { animation-delay: 0.05s; }
-.stagger-2 { animation-delay: 0.1s; }
-.stagger-3 { animation-delay: 0.15s; }
-.stagger-4 { animation-delay: 0.2s; }
-.stagger-5 { animation-delay: 0.25s; }
-.stagger-6 { animation-delay: 0.3s; }
-.stagger-7 { animation-delay: 0.35s; }
-.stagger-8 { animation-delay: 0.4s; }
+.stagger-2 { animation-delay: 0.15s; }
+.stagger-3 { animation-delay: 0.25s; }
+.stagger-4 { animation-delay: 0.35s; }
 
 @keyframes fadeInUp {
   from {
@@ -737,15 +625,12 @@ async function checkStatus() {
   .hero-stats {
     width: 100%;
     max-width: 400px;
+    grid-template-columns: repeat(3, 1fr);
     opacity: 1;
   }
 
   .modules-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .versions-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: 1fr;
   }
 
   .tech-grid {
@@ -767,8 +652,11 @@ async function checkStatus() {
     justify-content: center;
   }
 
+  .hero-stats {
+    grid-template-columns: 1fr;
+  }
+
   .modules-grid,
-  .versions-grid,
   .tech-grid {
     grid-template-columns: 1fr;
   }

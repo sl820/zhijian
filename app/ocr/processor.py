@@ -6,16 +6,23 @@ from pathlib import Path
 
 from .preprocess import ImagePreprocessor
 from .variant_map import VARIANT_CHAR_MAP, TABOO_RULES, normalize_variant_text, detect_taboo_context
-from .providers import EasyOCRProvider, AliyunOCRProvider, PaddleOCRProvider, EnhancedOCRProvider, TesseractOCRProvider, BaseOCRProvider
+from .providers import (
+    EasyOCRProvider,
+    AliyunOCRProvider,
+    PaddleOCRProvider,
+    RapidOCRProvider,
+    BaseOCRProvider,
+    DEFAULT_PROVIDER,
+)
 
 logger = logging.getLogger(__name__)
 
 # Provider 映射
 _OCR_PROVIDERS = {
-    "paddleocr": PaddleOCRProvider,
-    "tesseract": TesseractOCRProvider,
+    "easyocr": EasyOCRProvider,
     "aliyun": AliyunOCRProvider,
-    "enhanced": EnhancedOCRProvider,
+    "paddleocr": PaddleOCRProvider,
+    "rapidocr": RapidOCRProvider,
 }
 
 
@@ -27,18 +34,19 @@ class OCRProcessor:
         Args:
             config: Optional configuration dictionary with keys like
                     'dpi', 'language', 'confidence_threshold', etc.
-            provider: OCR provider name, one of ['easyocr', 'aliyun'].
-                     Defaults to 'easyocr'.
+            provider: OCR provider name, one of ['easyocr', 'paddleocr', 'rapidocr', 'aliyun'].
+                     Defaults to DEFAULT_PROVIDER (rapidocr if available, else easyocr).
         """
         self.config = config or {}
         self.preprocessor = ImagePreprocessor(self.config.get('preprocess', {}))
 
         # 选择 OCR provider
-        provider_name = provider or self.config.get('provider', 'paddleocr')
+        provider_name = provider or self.config.get('provider', DEFAULT_PROVIDER)
         provider_class = _OCR_PROVIDERS.get(provider_name)
 
         if provider_class is None:
-            logger.warning(f"Unknown OCR provider '{provider_name}', using easyocr")
+            logger.warning(f"Unknown OCR provider '{provider_name}', using {DEFAULT_PROVIDER}")
+            provider_class = _OCR_PROVIDERS.get(DEFAULT_PROVIDER) or EasyOCRProvider
             provider_class = EasyOCRProvider
 
         self.ocr = provider_class(self.config.get('ocr', {}))
@@ -77,15 +85,34 @@ class OCRProcessor:
             return {'doc_id': doc_id, 'error': 'Failed to load image', 'pages': []}
 
         preprocessed = self.preprocessor.preprocess(image)
-        angle = self.preprocessor.detect_skew_angle(preprocessed)
-        deskewed = self.preprocessor.deskew(preprocessed, angle)
+        deskewed = self.preprocessor.deskew(preprocessed)
 
         # OCR recognition
         ocr_result = self.ocr.recognize(deskewed)
-        text = ocr_result.get('text', '')
-        lines = ocr_result.get('lines', [])
-        chars = ocr_result.get('chars', [])
-        ocr_confidence = ocr_result.get('confidence', 0.0)
+        # 适配两种返回形态：
+        # 1) List[Dict]（BaseOCRProvider 约定）→ 每项是 {text, confidence, bbox, polygon}
+        # 2) Dict with {text, lines, chars, confidence}（旧 internal 格式）
+        if isinstance(ocr_result, list):
+            lines = ocr_result
+            text = '\n'.join(item.get('text', '') for item in lines)
+            confidences = [item.get('confidence', 0.0) for item in lines if item.get('confidence') is not None]
+            ocr_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+            chars = []
+            for line in lines:
+                line_text = line.get('text', '')
+                line_conf = line.get('confidence', 0.0)
+                line_bbox = line.get('bbox', [])
+                for i, ch in enumerate(line_text):
+                    chars.append({
+                        'char': ch,
+                        'bbox': line_bbox,
+                        'confidence': line_conf,
+                    })
+        else:
+            text = ocr_result.get('text', '')
+            lines = ocr_result.get('lines', [])
+            chars = ocr_result.get('chars', [])
+            ocr_confidence = ocr_result.get('confidence', 0.0)
 
         # Detect variants and taboo characters
         variant_count = 0
@@ -192,8 +219,7 @@ class OCRProcessor:
 
             # Preprocess
             preprocessed = self.preprocessor.preprocess(image_array)
-            angle = self.preprocessor.detect_skew_angle(preprocessed)
-            deskewed = self.preprocessor.deskew(preprocessed, angle)
+            deskewed = self.preprocessor.deskew(preprocessed)
 
             # OCR
             ocr_result = self.ocr.recognize(deskewed)

@@ -15,9 +15,8 @@ export const useAppStore = defineStore('app', () => {
   // 模块就绪状态
   const moduleStatus = ref({
     ocr: { ready: false, loading: false, error: null },
-    normalize: { ready: false, loading: false, error: null },
-    collation: { ready: false, loading: false, error: null },
-    rag: { ready: false, loading: false, error: null }
+    rag: { ready: false, loading: false, error: null },
+    kg: { ready: false, loading: false, error: null }
   })
 
   // 全局加载状态
