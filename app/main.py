@@ -2,13 +2,14 @@
 志鉴 FastAPI 入口
 精简版：OCR + KG + RAG 三大模块
 """
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import register_routes
+from app.api.routes import register_routes, trigger_warmup, get_warmup_state
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,8 +19,14 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     logger.info("「志鉴」系统启动中...")
-    yield
-    logger.info("「志鉴」系统关闭...")
+    # 后台异步预热三大模块（BGE 首次加载 ~30s 慢路径）；不阻塞 startup
+    warmup_task = asyncio.create_task(trigger_warmup())
+    try:
+        yield
+    finally:
+        if not warmup_task.done():
+            warmup_task.cancel()
+        logger.info("「志鉴」系统关闭...")
 
 
 app = FastAPI(
