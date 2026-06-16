@@ -799,6 +799,60 @@ async def kg_top_surnames(source: str = "jiapu", limit: int = 20):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/kg/layout")
+async def kg_layout(
+    source: str = "jiapu",
+    bbox: str = None,  # "xmin,ymin,xmax,ymax"
+    limit: int = 500,
+    offset: int = 0,
+):
+    """取预布局坐标子集（M6 前端星云图谱用）。
+
+    Args:
+        source: 数据源
+        bbox: 视锥 bbox "xmin,ymin,xmax,ymax"（可选）
+        limit: 返回节点上限
+        offset: 跳过
+
+    Returns:
+        {nodes, links, total_in_bbox, total_returned, ...}
+    """
+    try:
+        from ..database import layout_service
+        bbox_tuple = None
+        if bbox:
+            parts = [float(p) for p in bbox.split(",")]
+            if len(parts) != 4:
+                raise ValueError("bbox 必须是 4 个逗号分隔的 float: xmin,ymin,xmax,ymax")
+            bbox_tuple = tuple(parts)
+        result = layout_service.get_layout_subset(
+            source=source,
+            bbox=bbox_tuple,
+            limit=limit,
+            offset=offset,
+        )
+        return {"status": "success", **result}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error getting layout: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/kg/layout/metadata")
+async def kg_layout_metadata(source: str = "jiapu"):
+    """布局元信息（节点/边总数 + 坐标范围）。"""
+    try:
+        from ..database import layout_service
+        meta = layout_service.get_layout_metadata(source=source)
+        return {"status": "success", **meta}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error getting layout metadata: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/kg/entity/extract")
 async def kg_extract_entities(request: KGEntityExtractRequest):
     """从文本中提取实体（不存储）—— 用于 OCR 联动预览"""
