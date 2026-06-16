@@ -20,7 +20,6 @@
 """
 import json
 import logging
-import re
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -258,32 +257,6 @@ def identify_dynasty(bio_text: str) -> str:
     return ""
 
 
-_REL_SUFFIX_PATTERNS = [
-    ("之父", "FATHER"),
-    ("之母", "MOTHER"),
-    ("之子", "SON"),
-    ("之女", "DAUGHTER"),
-    ("之兄", "ELDER_BROTHER"),
-    ("之弟", "YOUNGER_BROTHER"),
-    ("之妻", "WIFE"),
-]
-
-_STOP_CHARS = set("以，。；、：（）\"\"''【】《》" + "0123456789")
-
-
-def _is_valid_target(target: str, stored: Set[str], dynasty_markers: Set[str], era_names: Set[str]) -> bool:
-    if not target or len(target) < 2:
-        return False
-    if target in dynasty_markers or target in era_names:
-        return False
-    if target[0].isdigit() or target.startswith("之"):
-        return False
-    # 排除是别人子串的（避免 "X" 跟 "XX" 误匹配）
-    if any(target in p and target != p for p in stored):
-        return False
-    return True
-
-
 def post_process_relations(
     service: KnowledgeGraphService,
     full_text: str,
@@ -306,61 +279,25 @@ def post_process_relations(
     era_names = app_config.ERA_NAMES
     relations_stored = 0
 
-    # Step 1: 原文规则抽取
-    for person_name in list(stored_names):
-        # 在传记局部 + 原文前 5000 字中搜索
-        search_text = full_text[:5000]
+    # Step 1: 原文规则抽取（M4：拆到 SuffixPatternExtractor，25 patterns + 分段扫描）
+    from app.kg.relation_extractor import SuffixPatternExtractor
+    extractor = SuffixPatternExtractor(
+        stored_names=stored_names,
+        dynasty_markers=dynasty_markers,
+        era_names=era_names,
+    )
 
-        for suffix, rel_type in _REL_SUFFIX_PATTERNS:
-            pattern = person_name + suffix
-            pos = 0
-            while True:
-                pos = search_text.find(pattern, pos)
-                if pos < 0:
-                    break
-                rest = search_text[pos + len(pattern) : pos + len(pattern) + 8]
-                # 跳过非 CJK 字符
-                skip = 0
-                while skip < len(rest) and not ('一' <= rest[skip] <= '鿿'):
-                    skip += 1
-                rest_cjk = rest[skip:]
-                if not rest_cjk:
-                    pos += 1
-                    continue
-                # 优先：从"之"前面找已知人名（处理"张缅，张弘策之子"类型）
-                person_start = pos + len(pattern) - len(suffix)
-                search_back = search_text[max(0, person_start - 10) : person_start]
-                target = None
-                for p_name in stored_names:
-                    if p_name != person_name and len(p_name) >= 2 and search_back.rfind(p_name) >= 0:
-                        target = p_name
-                        break
-                # 回退：提取 CJK 序列并清理
-                if target is None:
-                    year_m = re.match(r'([一-龥]{1,3})年', rest_cjk)
-                    if year_m and len(year_m.group(1)) >= 2:
-                        cjk_seq = year_m.group(1)
-                    else:
-                        end_idx = 0
-                        while end_idx < len(rest_cjk) and rest_cjk[end_idx] not in _STOP_CHARS:
-                            end_idx += 1
-                        cjk_seq = rest_cjk[:end_idx] if end_idx > 0 else rest_cjk[:4]
-                    m = re.match(r'([一-龥]{2,4})', cjk_seq)
-                    if not m:
-                        pos += 1
-                        continue
-                    target = m.group(1)
-                    for s in ["后裔", "后"]:
-                        if target.startswith(s):
-                            target = target[len(s):]
-                            break
-                if _is_valid_target(target, stored_names, dynasty_markers, era_names):
-                    try:
-                        service.add_relation(person_name, target, rel_type, confidence=0.85)
-                        relations_stored += 1
-                    except Exception:
-                        pass
-                pos += 1
+    # 跨全文分段扫描（取消 5k 截断的关键改动）
+    for person_name in list(stored_names):
+        extracted = extractor.extract(full_text, person_name)
+        for rel in extracted:
+            try:
+                service.add_relation(
+                    rel["from"], rel["to"], rel["type"], confidence=rel["confidence"],
+                )
+                relations_stored += 1
+            except Exception:
+                pass
 
     # Step 2: 存 pipeline 抽到的关系（仅当两端都在 stored_names）
     for rel in pipeline_relations:
