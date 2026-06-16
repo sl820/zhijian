@@ -17,14 +17,14 @@ export const MODULES = [
   },
   {
     id: 'kg',
-    name: '知识图谱',
-    description: '从方志文本中抽取人物实体与家族关系，构建可探索的知识网络',
+    name: '星云图谱',
+    description: '从方志文本抽取人物实体与家族关系，以「星野图考」美学呈现 3D 人物星云图，可点击探查人物详情与跨源证据',
     icon: 'DataAnalysis',
-    color: '#e67e22',
-    path: '/knowledge',
+    color: '#c2362a',
+    path: '/nebula',
     status: 'completed',
-    features: ['NER 实体抽取', '家族关系识别', '力导向可视化'],
-    technologies: ['正则 + LLM 抽取', '纯内存存储', 'ECharts']
+    features: ['服务端 FA2 预布局', 'three.js 3D 渲染', '视锥裁剪 + zoom 密度过滤', '朱砂印章节点 + 墨黑飞白边'],
+    technologies: ['Three.js', 'ForceAtlas2 / networkx', '霞鹜文楷', '靛蓝底+朱砂红美学']
   },
   {
     id: 'rag',

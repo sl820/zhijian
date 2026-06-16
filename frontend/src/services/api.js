@@ -107,8 +107,8 @@ export const kgAPI = {
     return apiClient.get(`/kg/persons/${encodeURIComponent(name)}`)
   },
 
-  getGraph: (limit = 200) => {
-    return apiClient.get('/kg/graph', { params: { limit } })
+  getGraph: (limit = 200, source = null) => {
+    return apiClient.get('/kg/graph', { params: { limit, source } })
   },
 
   initKG: (clear = false, background = false) => {
@@ -119,7 +119,18 @@ export const kgAPI = {
 
   extract: (text, source = 'OCR', title = '') => {
     return apiClient.post('/kg/entity/extract', { text, source, title })
-  }
+  },
+
+  // 星云图谱（M6）
+  getLayout: (source = 'jiapu', bbox = null, limit = 500, offset = 0) => {
+    return apiClient.get('/kg/layout', { params: { source, bbox, limit, offset } })
+  },
+
+  getLayoutMetadata: (source = 'jiapu') => {
+    return apiClient.get('/kg/layout/metadata', { params: { source } })
+  },
+
+  listSources: () => apiClient.get('/kg/sources'),
 }
 
 export default {
