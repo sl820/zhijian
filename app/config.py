@@ -33,6 +33,11 @@ def _env_path(name: str, default: Path) -> Path:
     return Path(_env(name, str(default)))
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    val = _env(name, "true" if default else "false").lower()
+    return val in ("1", "true", "yes", "on")
+
+
 # ============================================================
 # LLM (Ollama 本地部署)
 # ============================================================
@@ -73,6 +78,14 @@ KG_PERSIST_PATH = _env_path(
 # ============================================================
 DEFAULT_CORPUS_DIR = PROJECT_ROOT / "data" / "raw" / "1998"
 DEFAULT_CORPUS_FILE = DEFAULT_CORPUS_DIR / "第二十一编人物.txt"
+
+
+# ============================================================
+# Module toggles
+# ============================================================
+# OCR 默认关：保留代码但产品中禁用，未来如需扫描录入功能可通过
+# ZHIJIAN_OCR_ENABLED=true 启用
+OCR_ENABLED = _env_bool("ZHIJIAN_OCR_ENABLED", False)
 
 
 # ============================================================

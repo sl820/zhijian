@@ -137,6 +137,12 @@ _warmup_state: Dict = {
 }
 
 
+def _ocr_enabled() -> bool:
+    """OCR 模块是否启用（centralized check）。"""
+    from ..config import OCR_ENABLED
+    return bool(OCR_ENABLED)
+
+
 def get_warmup_state() -> Dict:
     return _warmup_state
 
@@ -171,7 +177,7 @@ def _warmup_rag() -> None:
 
 
 async def trigger_warmup() -> None:
-    """异步顺序预热三个模块。失败不抛，只记录到 _warmup_state。"""
+    """异步顺序预热启用的模块。失败不抛，只记录到 _warmup_state。"""
     if _warmup_state["running"]:
         logger.info("[warmup] 已在进行中，跳过")
         return
@@ -185,10 +191,22 @@ async def trigger_warmup() -> None:
         mod["error"] = None
     _warmup_state["last_error"] = None
 
-    logger.info("[warmup] 开始预热三大模块...")
+    # 按 OCR_ENABLED 过滤要预热的模块
+    plan = [
+        ("ocr", _warmup_ocr, _ocr_enabled()),
+        ("kg", _warmup_kg, True),
+        ("rag", _warmup_rag, True),
+    ]
+    enabled_modules = [m for m, _, ok in plan if ok]
+    logger.info(f"[warmup] 开始预热模块: {enabled_modules}（OCR={_ocr_enabled()}）")
 
-    for module_name, fn in [("ocr", _warmup_ocr), ("kg", _warmup_kg), ("rag", _warmup_rag)]:
+    for module_name, fn, enabled in plan:
         mod_state = _warmup_state["modules"][module_name]
+        if not enabled:
+            mod_state["status"] = "disabled"
+            mod_state["duration_sec"] = 0
+            logger.info(f"[warmup] {module_name} 已禁用，跳过")
+            continue
         mod_state["status"] = "loading"
         start = time.time()
         try:
@@ -222,9 +240,14 @@ async def health_check():
 @router.get("/status")
 async def api_status():
     warm = _warmup_state
+    ocr_on = _ocr_enabled()
     return {
         "api_version": "v1",
-        "endpoints": ["/ocr", "/kg", "/rag"],
+        "endpoints": ["/ocr", "/kg", "/rag"] if ocr_on else ["/kg", "/rag"],
+        "ocr": {
+            "enabled": ocr_on,
+            "warmup_status": warm["modules"]["ocr"]["status"],
+        },
         "warmup": {
             "completed": warm["completed"],
             "running": warm["running"],
@@ -413,11 +436,18 @@ async def rag_status():
 @router.get("/ocr/status")
 async def ocr_status():
     """OCR 服务状态（不触发模型下载）"""
+    if not _ocr_enabled():
+        return {
+            "status": "disabled",
+            "enabled": False,
+            "message": "OCR 模块已禁用（ZHIJIAN_OCR_ENABLED=false）",
+        }
     try:
         from ..ocr.providers import ALIYUN_AVAILABLE, DEFAULT_PROVIDER, provider_availability
         avail = provider_availability()
         return {
             "status": "operational",
+            "enabled": True,
             "providers": avail,
             "default_provider": DEFAULT_PROVIDER,
             "model_load": "lazy",
@@ -425,7 +455,7 @@ async def ocr_status():
         }
     except Exception as e:
         logger.error(f"Error in OCR status: {e}")
-        return {"status": "error", "error": str(e)}
+        return {"status": "error", "enabled": True, "error": str(e)}
 
 
 @router.get("/ocr/providers")
@@ -485,6 +515,11 @@ async def ocr_recognize(
     detect_taboo: bool = True,
 ):
     """OCR 识别单张图片"""
+    if not _ocr_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="OCR 模块已禁用（ZHIJIAN_OCR_ENABLED=false）。如需启用扫描录入功能，请设置环境变量后重启服务。",
+        )
     from ..ocr.providers import ALIYUN_AVAILABLE, DEFAULT_PROVIDER, provider_availability
 
     # 缺省 provider
@@ -546,6 +581,11 @@ async def ocr_batch(
     provider: str = "easyocr",
 ):
     """批量 OCR 识别（≤10 张，总大小 ≤20MB）"""
+    if not _ocr_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="OCR 模块已禁用（ZHIJIAN_OCR_ENABLED=false）",
+        )
     from ..ocr.providers import ALIYUN_AVAILABLE
 
     if provider == "aliyun" and not ALIYUN_AVAILABLE:

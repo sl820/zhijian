@@ -1,5 +1,33 @@
 <template>
   <div class="ocr-view">
+    <!-- OCR 模块禁用状态卡（M1：默认关） -->
+    <div v-if="ocrStore.ocrStatus?.status === 'disabled'" class="ocr-disabled-banner">
+      <div class="banner-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
+          <rect x="3" y="11" width="18" height="11" rx="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          <line x1="12" y1="15" x2="12" y2="19"/>
+        </svg>
+      </div>
+      <div class="banner-content">
+        <h2 class="banner-title">OCR 模块暂未启用</h2>
+        <p class="banner-message">
+          当前版本聚焦「星云图谱」与「RAG 智能问答」两大模块。
+          后续如需加入扫描录入功能，可在后端环境变量中设置
+          <code>ZHIJIAN_OCR_ENABLED=true</code> 并重启服务。
+        </p>
+        <p class="banner-hint">
+          现有的「星云图谱」可浏览 200 万家谱人物，「RAG 问答」可对知识库提问。
+        </p>
+      </div>
+      <div class="banner-actions">
+        <el-button type="primary" plain @click="$router.push('/')">返回首页</el-button>
+        <el-button type="primary" plain @click="$router.push('/knowledge')">查看星云图谱</el-button>
+      </div>
+    </div>
+
+    <!-- OCR 启用时显示原有 UI -->
+    <template v-else>
     <header class="page-header">
       <div class="header-left">
         <h1 class="page-title">OCR 古籍识别</h1>
@@ -268,6 +296,7 @@
         <el-button type="primary" :loading="ragImporting" @click="confirmRagImport">确认灌入</el-button>
       </template>
     </el-dialog>
+    </template>
   </div>
 </template>
 
@@ -797,5 +826,63 @@ onUnmounted(() => {
 @media (max-width: 1024px) {
   .ocr-layout { grid-template-columns: 1fr; }
   .left-panel { max-height: 400px; }
+}
+
+/* ==================== OCR Disabled Banner ==================== */
+.ocr-disabled-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 70vh;
+  padding: 60px 40px;
+  text-align: center;
+  background: var(--card-bg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  margin: 40px auto;
+  max-width: 640px;
+}
+
+.ocr-disabled-banner .banner-icon {
+  color: var(--text-muted);
+  margin-bottom: 24px;
+  opacity: 0.6;
+}
+
+.ocr-disabled-banner .banner-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 16px;
+  font-family: var(--font-serif);
+}
+
+.ocr-disabled-banner .banner-message {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+  margin: 0 0 12px;
+  max-width: 480px;
+}
+
+.ocr-disabled-banner .banner-message code {
+  background: var(--bg-tertiary);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent);
+}
+
+.ocr-disabled-banner .banner-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0 0 28px;
+}
+
+.ocr-disabled-banner .banner-actions {
+  display: flex;
+  gap: 12px;
 }
 </style>

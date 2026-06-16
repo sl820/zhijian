@@ -35,25 +35,37 @@ def client():
 # ============================================================
 
 def test_ocr_status_structure(client):
+    """OCR 状态应返回 enabled 字段 + 状态。"""
     r = client.get("/api/v1/ocr/status")
     assert r.status_code == 200
     body = r.json()
-    assert body["status"] in ("operational", "error")
-    assert "providers" in body
-    providers = body["providers"]
-    assert providers["easyocr"] is True
-    assert providers["paddleocr"] is True
-    # aliyun 由环境变量决定开关
-    assert "aliyun" in providers
-    assert body["default_provider"] in ("rapidocr", "easyocr", "paddleocr", "aliyun")
-    assert body["model_load"] == "lazy"
+    # OCR 默认关（ZHIJIAN_OCR_ENABLED=False）
+    if not body.get("enabled", True):
+        assert body["status"] == "disabled"
+        assert "message" in body
+    else:
+        assert body["status"] in ("operational", "error")
+        assert "providers" in body
+        providers = body["providers"]
+        assert providers["easyocr"] is True
+        assert providers["paddleocr"] is True
+        assert "aliyun" in providers
+        assert body["default_provider"] in ("rapidocr", "easyocr", "paddleocr", "aliyun")
+        assert body["model_load"] == "lazy"
 
 
 def test_status_includes_ocr_endpoint(client):
+    """status endpoints 含 /ocr 仅当 OCR 启用。"""
     r = client.get("/api/v1/status")
     assert r.status_code == 200
     body = r.json()
-    assert "/ocr" in body["endpoints"]
+    ocr_on = body.get("ocr", {}).get("enabled", False)
+    if ocr_on:
+        assert "/ocr" in body["endpoints"]
+    else:
+        assert "/ocr" not in body["endpoints"]
+        assert "/kg" in body["endpoints"]
+        assert "/rag" in body["endpoints"]
 
 
 # ============================================================
@@ -123,13 +135,13 @@ def test_sample_file_rejects_path_traversal(client):
 # 错误路径
 # ============================================================
 
-def test_recognize_missing_file_returns_422(client):
+def test_recognize_missing_file_returns_422_or_503(client):
+    """缺文件 → 422 (OCR 启用) 或 503 (OCR 默认关)。"""
     r = client.post("/api/v1/ocr/recognize")
-    assert r.status_code == 422
+    assert r.status_code in (422, 503)
 
 
-def test_recognize_unknown_provider_returns_400(client):
-    # 1x1 PNG
+def test_recognize_unknown_provider_returns_400_or_503(client):
     png_bytes = (
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
         b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00"
@@ -141,31 +153,32 @@ def test_recognize_unknown_provider_returns_400(client):
         params={"provider": "unknown_ocr"},
         files={"file": ("test.png", io.BytesIO(png_bytes), "image/png")},
     )
-    assert r.status_code == 400
-    assert "provider" in r.json().get("detail", "")
+    # OCR 默认关 → 503；OCR 启用 + unknown provider → 400
+    assert r.status_code in (400, 503)
+    if r.status_code == 400:
+        assert "provider" in r.json().get("detail", "")
 
 
-def test_recognize_unsupported_extension_returns_400(client):
+def test_recognize_unsupported_extension_returns_400_or_503(client):
     r = client.post(
         "/api/v1/ocr/recognize",
         params={"provider": "easyocr"},
         files={"file": ("test.txt", io.BytesIO(b"not an image"), "text/plain")},
     )
-    assert r.status_code == 400
+    assert r.status_code in (400, 503)
 
 
-def test_recognize_oversize_returns_413(client):
-    # 构造一个 21MB 假文件
+def test_recognize_oversize_returns_413_or_503(client):
     big = b"\x00" * (21 * 1024 * 1024)
     r = client.post(
         "/api/v1/ocr/recognize",
         params={"provider": "easyocr"},
         files={"file": ("big.png", io.BytesIO(big), "image/png")},
     )
-    assert r.status_code == 413
+    assert r.status_code in (413, 503)
 
 
-def test_batch_too_many_files_returns_413(client):
+def test_batch_too_many_files_returns_413_or_503(client):
     files = [
         ("files", (f"img_{i}.png", io.BytesIO(b"x" * 100), "image/png"))
         for i in range(11)
@@ -175,7 +188,20 @@ def test_batch_too_many_files_returns_413(client):
         params={"provider": "easyocr"},
         files=files,
     )
-    assert r.status_code == 413
+    assert r.status_code in (413, 503)
+
+
+def test_recognize_disabled_returns_503_when_off(client):
+    """OCR 默认关时，所有 POST 都应返回 503。"""
+    status = client.get("/api/v1/ocr/status").json()
+    if status.get("enabled", True):
+        pytest.skip("OCR 已启用，跳过 503 测试")
+    r = client.post(
+        "/api/v1/ocr/recognize",
+        files={"file": ("test.png", io.BytesIO(b"x"), "image/png")},
+    )
+    assert r.status_code == 503
+    assert "禁用" in r.json().get("detail", "")
 
 
 # ============================================================

@@ -36,11 +36,16 @@ def test_health_returns_healthy(client):
     assert body["service"] == "zhijian-api"
 
 
-def test_status_lists_all_three_modules(client):
+def test_status_lists_active_modules(client):
+    """endpoints 列表应反映 OCR 是否启用。"""
     r = client.get("/api/v1/status")
     assert r.status_code == 200
     body = r.json()
-    assert set(body["endpoints"]) == {"/kg", "/rag", "/ocr"}
+    ocr_on = body.get("ocr", {}).get("enabled", False)
+    if ocr_on:
+        assert set(body["endpoints"]) == {"/kg", "/rag", "/ocr"}
+    else:
+        assert set(body["endpoints"]) == {"/kg", "/rag"}
 
 
 def test_ask_missing_question_returns_422(client):

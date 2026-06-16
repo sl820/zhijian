@@ -1,6 +1,6 @@
 """
 志鉴 FastAPI 入口
-精简版：OCR + KG + RAG 三大模块
+精简版：OCR + KG + RAG 三大模块（OCR 默认关）
 """
 import asyncio
 import logging
@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import OCR_ENABLED
 from app.api.routes import register_routes, trigger_warmup, get_warmup_state
 
 logging.basicConfig(level=logging.INFO)
@@ -19,7 +20,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     logger.info("「志鉴」系统启动中...")
-    # 后台异步预热三大模块（BGE 首次加载 ~30s 慢路径）；不阻塞 startup
+    if not OCR_ENABLED:
+        logger.info("[lifespan] OCR 已禁用，跳过 OCR 预热")
+    # 后台异步预热启用的模块（BGE 首次加载 ~30s 慢路径）；不阻塞 startup
     warmup_task = asyncio.create_task(trigger_warmup())
     try:
         yield
@@ -52,7 +55,8 @@ async def root():
     return {
         "message": "「志鉴」古籍方志智能化整理平台 API",
         "version": "2.0.0",
-        "modules": ["ocr", "rag", "kg"],
+        "modules": ["rag", "kg"] if not OCR_ENABLED else ["ocr", "rag", "kg"],
+        "ocr_enabled": OCR_ENABLED,
     }
 
 
