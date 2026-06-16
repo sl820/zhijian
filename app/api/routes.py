@@ -1010,7 +1010,6 @@ async def kg_init(
                 "dynasty": identify_dynasty(bio),
                 "years": entity.get("years", ""),
                 "birthplace": entity.get("location", ""),
-                "person_type": entity.get("person_type", 2),
                 "source": str(person_file),
             })
             stored_names.add(name)

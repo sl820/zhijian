@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 from .. import config as app_config
+from ..kg.classifier import classify_person
 
 logger = logging.getLogger(__name__)
 
@@ -84,27 +85,35 @@ class KnowledgeGraphService:
 
         接收 dict 至少含 'name' 字段，其他字段（biography, dynasty, years, birthplace, ...）按需传入。
         返回存储后的完整 dict。
+
+        注：person_type 始终由 classifier 决定（不信任调用方传入值）。
         """
         if not person or not person.get("name"):
             raise ValueError("person 必须包含 'name' 字段")
         name = person["name"]
         if name in self._persons:
-            # 更新非空字段
+            # 更新非空字段（person_type 由 classifier 强制重算）
             for k, v in person.items():
+                if k == "person_type":
+                    continue
                 if v not in (None, ""):
                     self._persons[name][k] = v
+            self._persons[name]["person_type"] = classify_person(self._persons[name])
         else:
             # 新建
-            self._persons[name] = {
+            stored = {
                 "name": name,
                 "biography": person.get("biography", ""),
                 "dynasty": person.get("dynasty", ""),
                 "years": person.get("years", ""),
                 "birthplace": person.get("birthplace", ""),
                 "title": person.get("title", ""),
-                "person_type": person.get("person_type", 2),
+                "family_name": person.get("family_name", ""),
+                "role_of_family": person.get("role_of_family", ""),
                 "source": person.get("source", ""),
             }
+            stored["person_type"] = classify_person(stored)
+            self._persons[name] = stored
         self._save()
         return self._persons[name]
 
