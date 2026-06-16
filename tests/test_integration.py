@@ -37,14 +37,24 @@ class TestImports:
         assert OllamaClient is not None
 
     def test_api_routes_imports(self):
-        from app.api.routes import (
-            router,
+        from app.api import (
+            register_routes,
+            trigger_warmup,
+            get_warmup_state,
+        )
+        from app.api._shared import (
             get_rag_service,
             get_kg_service,
+            get_ocr_processor,
+            _ocr_enabled,
         )
-        assert router is not None
+        assert callable(register_routes)
+        assert callable(trigger_warmup)
+        assert callable(get_warmup_state)
         assert callable(get_rag_service)
         assert callable(get_kg_service)
+        assert callable(get_ocr_processor)
+        assert callable(_ocr_enabled)
 
     def test_config_exports(self):
         from app import config

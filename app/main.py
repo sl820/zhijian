@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import OCR_ENABLED
-from app.api.routes import register_routes, trigger_warmup, get_warmup_state
+from app.api import register_routes, trigger_warmup, get_warmup_state
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
