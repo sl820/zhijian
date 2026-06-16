@@ -663,6 +663,20 @@ async def ocr_sample_file(filename: str):
 # KG (知识图谱)
 # ============================================================
 
+@router.get("/kg/sources")
+async def kg_sources():
+    """列出所有可用数据源"""
+    from ..database import source_router
+    sources = source_router.list_sources()
+    return {
+        "status": "success",
+        "sources": [
+            {"name": k, "label": v.get("label", k), "enabled": v.get("enabled", False)}
+            for k, v in sources.items()
+        ],
+    }
+
+
 @router.get("/kg/status")
 async def kg_status():
     """获取知识图谱系统状态"""
@@ -674,21 +688,64 @@ async def kg_status():
 
 
 @router.get("/kg/persons")
-async def kg_list_persons(limit: int = 200):
-    """获取所有人物列表"""
+async def kg_list_persons(
+    limit: int = 200,
+    offset: int = 0,
+    source: str = None,
+    surname: str = None,
+    has_relations: bool = False,
+):
+    """获取所有人物列表
+
+    Args:
+        limit: 返回上限
+        offset: 跳过
+        source: 数据源标识（如 "jiapu"），None 用 in-memory
+        surname: 按姓过滤（拼音，仅 SQLite 源）
+        has_relations: 仅返回在关系中出现的（仅 SQLite 源）
+    """
     try:
+        if source:
+            # SQLite 数据源路径
+            from ..database import jiapu_query
+            persons, total = jiapu_query.list_persons(
+                source=source,
+                limit=limit,
+                offset=offset,
+                surname=surname,
+                has_relations=has_relations,
+            )
+            return {
+                "status": "success",
+                "source": source,
+                "persons": persons,
+                "count": len(persons),
+                "total": total,
+            }
+        # in-memory 默认路径
         service = get_kg_service()
         persons = service.get_all_persons(limit=limit)
-        return {"status": "success", "persons": persons, "count": len(persons)}
+        return {"status": "success", "source": "memory", "persons": persons, "count": len(persons)}
     except Exception as e:
         logger.error(f"Error listing persons: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/kg/persons/{name}")
-async def kg_get_person(name: str, depth: int = 1):
-    """获取单个人物详情（含关系）"""
+async def kg_get_person(name: str, depth: int = 1, source: str = None):
+    """获取单个人物详情（含关系）
+
+    注：SQLite 源时 name 应为 uri（如 p:jiapu/xxx）
+    """
     try:
+        if source:
+            from ..database import jiapu_query
+            person = jiapu_query.get_person(name, source=source)
+            if not person:
+                raise HTTPException(status_code=404, detail=f"人物 '{name}' 在 {source} 中未找到")
+            relations = jiapu_query.get_person_relations(name, source=source)
+            person["relations"] = relations
+            return {"status": "success", "source": source, "person": person}
         service = get_kg_service()
         person = service.get_person_with_relations(name, depth=depth)
         if not person:
@@ -702,22 +759,43 @@ async def kg_get_person(name: str, depth: int = 1):
 
 
 @router.get("/kg/graph")
-async def kg_get_graph(limit: int = 200):
-    """获取图谱可视化数据（ECharts 格式：nodes + links）"""
+async def kg_get_graph(limit: int = 200, offset: int = 0, source: str = None):
+    """获取图谱可视化数据（ECharts 格式：nodes + links）
+
+    SQLite 源：取一段关系 + 涉及的 person
+    in-memory：取全部
+    """
     try:
-        service = get_kg_service()
-        data = service.get_graph_data(limit=limit)
+        if source:
+            from ..database import jiapu_query
+            data = jiapu_query.get_graph_subset(source=source, limit=limit, offset=offset)
+        else:
+            service = get_kg_service()
+            data = service.get_graph_data(limit=limit)
         nodes = data.get("nodes", [])
         links = data.get("links", [])
         return {
             "status": "success",
+            "source": source or "memory",
             "nodes": nodes,
             "links": links,
-            "total_persons": len(nodes),
-            "total_links": len(links),
+            "total_persons": data.get("total_persons", len(nodes)),
+            "total_links": data.get("total_links", len(links)),
         }
     except Exception as e:
         logger.error(f"Error getting graph data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/kg/surnames")
+async def kg_top_surnames(source: str = "jiapu", limit: int = 20):
+    """按姓统计 top N（仅 SQLite 源）"""
+    try:
+        from ..database import jiapu_query
+        rows = jiapu_query.top_surnames(source=source, limit=limit)
+        return {"status": "success", "source": source, "surnames": rows}
+    except Exception as e:
+        logger.error(f"Error getting top surnames: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
