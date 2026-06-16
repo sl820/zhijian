@@ -26,6 +26,8 @@ PERSON_FIELD_MAP = {
     "family_name": "family_name",       # 拼音
     "role_of_family": "role_of_family",
     "courtesy_name": "courtesy_name",   # 字
+    "description": "biography",         # 用于 dynasty 子串过滤（M5）
+    "gender": "gender",
 }
 
 # jiapu.person_relations 字段
@@ -178,6 +180,8 @@ def get_graph_subset(
     source: str = "jiapu",
     limit: int = 500,
     offset: int = 0,
+    category: Optional[int] = None,
+    dynasty: Optional[str] = None,
 ) -> Dict:
     """取图谱可视化的子集：N 个有关系的 person + 他们的关系。
 
@@ -185,7 +189,8 @@ def get_graph_subset(
     1. 取 person_relations offset..offset+limit
     2. 收集涉及的所有 uri 去重
     3. 查这些 uri 的 persons 信息
-    4. 返回 {nodes, links}
+    4. 应用 category / dynasty 过滤（M5）
+    5. 返回 {nodes, links}
     """
     src = source_router.assert_enabled(source)
     with _connect(src["path"]) as conn:
@@ -217,6 +222,21 @@ def get_graph_subset(
 
         nodes = [_row_to_person(r) for r in person_rows]
 
+        # 应用 M5 复合筛选
+        if category is not None or dynasty:
+            allowed_uris = set()
+            for n in nodes:
+                if category is not None and n.get("person_type") != category:
+                    continue
+                if dynasty:
+                    # jiapu 无 dynasty 列；用 biography / name 子串匹配
+                    bio = (n.get("biography") or "") + (n.get("name") or "")
+                    if dynasty not in bio:
+                        continue
+                allowed_uris.add(n["uri"])
+            nodes = [n for n in nodes if n["uri"] in allowed_uris]
+            links = [l for l in links if l["source"] in allowed_uris and l["target"] in allowed_uris]
+
         # 统计总关系数
         total_links = conn.execute("SELECT COUNT(*) FROM person_relations").fetchone()[0]
 
@@ -225,4 +245,5 @@ def get_graph_subset(
             "links": links,
             "total_persons": len(nodes),
             "total_links": total_links,
+            "filters": {"category": category, "dynasty": dynasty},
         }

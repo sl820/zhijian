@@ -36,6 +36,7 @@
     <!-- 3D Canvas -->
     <NebulaCanvas
       v-if="!loading && layoutNodes.length"
+      ref="nebulaRef"
       :nodes="layoutNodes"
       :edges="layoutEdges"
       :loading="loading"
@@ -103,6 +104,7 @@ const layoutEdges = ref([])
 const layoutMeta = ref({})
 const error = ref('')
 const selectedNode = ref(null)
+const nebulaRef = ref(null)
 
 const categoryLegend = [
   { id: 0, name: CATEGORY_NAMES[0], color: CATEGORY_COLORS[0] },
@@ -194,13 +196,20 @@ function onBackgroundClick() {
 }
 
 function onNavigate(nodeData) {
-  // 子图节点点击 → 切到该人物
+  // 子图节点点击 → 切到该人物 + 主画布相机飞向（M7 联动）
   selectedNode.value = {
     id: nodeData.id,
     name: nodeData.name,
     dynasty: nodeData.dynasty,
     region: '',
     category: nodeData.category ?? 2,
+  }
+  // 触发 3D 主画布相机飞向该节点
+  if (nebulaRef.value?.flyToNode) {
+    const ok = nebulaRef.value.flyToNode(nodeData.id)
+    if (!ok) {
+      console.warn(`[Nebula] flyToNode: node ${nodeData.id} 不在主画布节点集`)
+    }
   }
 }
 

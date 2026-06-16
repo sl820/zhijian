@@ -20,6 +20,19 @@ from ._shared import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1")
 
+
+def _person_type(entity: Dict) -> int:
+    """统一的 person_type 强制覆盖（M3 归类）。
+
+    即使外部传入 0/1/2/3 也走规则重判，避免历史脏数据 / pipeline 默认值
+    导致全部落 CATEGORY_OTHER (2)。
+    """
+    try:
+        from ..kg.classifier import classify_person
+        return classify_person(entity)
+    except Exception:
+        return 2
+
 # KG (知识图谱)
 # ============================================================
 
@@ -328,19 +341,38 @@ async def kg_person_rag(uri: str, q: str, name: str = None, top_k: int = 3):
 
 
 @router.get("/kg/graph")
-async def kg_get_graph(limit: int = 200, offset: int = 0, source: str = None):
+async def kg_get_graph(
+    limit: int = 200,
+    offset: int = 0,
+    source: str = None,
+    category: int = None,
+    dynasty: str = None,
+):
     """获取图谱可视化数据（ECharts 格式：nodes + links）
 
     SQLite 源：取一段关系 + 涉及的 person
     in-memory：取全部
+
+    M5 复合筛选：
+    - category: 0=氏族 / 1=妻妾 / 2=其他 / 3=官吏
+    - dynasty: 朝代子串（jiapu 源用 biography/name 子串匹配）
     """
     try:
         if source:
             from ..database import jiapu_query
-            data = jiapu_query.get_graph_subset(source=source, limit=limit, offset=offset)
+            data = jiapu_query.get_graph_subset(
+                source=source, limit=limit, offset=offset,
+                category=category, dynasty=dynasty,
+            )
         else:
             service = get_kg_service()
             data = service.get_graph_data(limit=limit)
+            # in-memory 路径也支持 category 筛选
+            if category is not None:
+                nodes = [n for n in data.get("nodes", []) if n.get("person_type") == category]
+                uris = {n["uri"] if "uri" in n else n["name"] for n in nodes}
+                links = [l for l in data.get("links", []) if l.get("source") in uris and l.get("target") in uris]
+                data = {**data, "nodes": nodes, "links": links}
         nodes = data.get("nodes", [])
         links = data.get("links", [])
         return {
@@ -350,6 +382,7 @@ async def kg_get_graph(limit: int = 200, offset: int = 0, source: str = None):
             "links": links,
             "total_persons": data.get("total_persons", len(nodes)),
             "total_links": data.get("total_links", len(links)),
+            "filters": data.get("filters"),
         }
     except Exception as e:
         logger.error(f"Error getting graph data: {e}")
@@ -473,7 +506,12 @@ async def kg_build_pipeline(request: KGPipelineRequest):
                         "dynasty": entity.get("dynasty", ""),
                         "years": entity.get("years", ""),
                         "birthplace": entity.get("location", ""),
-                        "person_type": entity.get("person_type", 2),
+                        "person_type": _person_type({
+                            "name": name,
+                            "biography": entity.get("biography", ""),
+                            "dynasty": entity.get("dynasty", ""),
+                            "birthplace": entity.get("location", ""),
+                        }),
                         "source": entity.get("source", request.source),
                     })
                     stored_count += 1
@@ -517,6 +555,13 @@ async def kg_add_entity(request: KGEntityStoreRequest):
         service = get_kg_service()
         if not request.name:
             raise HTTPException(status_code=400, detail="name is required")
+        entity_dict = {
+            "name": request.name,
+            "biography": request.biography or "",
+            "dynasty": request.dynasty or "",
+            "birthplace": request.birthplace or "",
+            "title": request.title or "",
+        }
         person = service.add_person({
             "name": request.name,
             "biography": request.biography or "",
@@ -524,7 +569,7 @@ async def kg_add_entity(request: KGEntityStoreRequest):
             "years": request.years or "",
             "birthplace": request.birthplace or "",
             "title": request.title or "",
-            "person_type": request.person_type or 2,
+            "person_type": _person_type(entity_dict),
             "source": request.source or "",
         })
         return {"status": "success", "person": person}
@@ -600,13 +645,19 @@ def _run_kg_init_background(clear: bool, corpus_path: str):
                 stored_names.add(name)
                 continue
             bio = (entity.get("biography") or "")[:500]
+            dynasty = identify_dynasty(bio)
             service.add_person({
                 "name": name,
                 "biography": bio,
-                "dynasty": identify_dynasty(bio),
+                "dynasty": dynasty,
                 "years": entity.get("years", ""),
                 "birthplace": entity.get("location", ""),
-                "person_type": entity.get("person_type", 2),
+                "person_type": _person_type({
+                    "name": name,
+                    "biography": bio,
+                    "dynasty": dynasty,
+                    "birthplace": entity.get("location", ""),
+                }),
                 "source": str(person_file),
             })
             stored_names.add(name)
@@ -705,12 +756,19 @@ async def kg_init(
                 stored_names.add(name)
                 continue
             bio = (entity.get("biography") or "")[:500]
+            dynasty = identify_dynasty(bio)
             service.add_person({
                 "name": name,
                 "biography": bio,
-                "dynasty": identify_dynasty(bio),
+                "dynasty": dynasty,
                 "years": entity.get("years", ""),
                 "birthplace": entity.get("location", ""),
+                "person_type": _person_type({
+                    "name": name,
+                    "biography": bio,
+                    "dynasty": dynasty,
+                    "birthplace": entity.get("location", ""),
+                }),
                 "source": str(person_file),
             })
             stored_names.add(name)

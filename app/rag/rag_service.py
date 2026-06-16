@@ -12,6 +12,7 @@ from .chunker import TextChunker
 from .embedder import Embedder
 from .retriever import Retriever
 from .generator import Generator
+from ..llm.ollama_client import LLMUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -292,6 +293,10 @@ class RAGService:
                     answer = gen.generate(question, retrieved)
             else:
                 answer = gen.generate(question, retrieved)
+        except LLMUnavailable as e:
+            logger.warning(f"LLM 暂不可用（已确认）: {e}")
+            llm_unavailable = True
+            answer = gen.generate_with_fallback(question, retrieved) if gen else f"[LLM 暂不可用] 检索到 {len(retrieved)} 条相关片段"
         except Exception as e:
             logger.error(f"LLM 生成失败: {e}")
             llm_unavailable = True
@@ -390,6 +395,10 @@ class RAGService:
                     answer = gen.generate(question, top_results)
             else:
                 answer = gen.generate(question, top_results)
+        except LLMUnavailable as e:
+            logger.warning(f"LLM 暂不可用（已确认）: {e}")
+            llm_unavailable = True
+            answer = gen.generate_with_fallback(question, top_results) if gen else f"[LLM 暂不可用] 检索到 {len(top_results)} 条相关片段"
         except Exception as e:
             logger.error(f"LLM 生成失败: {e}")
             llm_unavailable = True

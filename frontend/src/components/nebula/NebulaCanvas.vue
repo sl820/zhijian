@@ -30,7 +30,7 @@ import { PALETTE } from '../../constants/palette.js'
 import { createPersonNode, setNodeState, createNameLabel } from './PersonNode.js'
 import { createRelationEdges, highlightEdgesForNode } from './RelationEdge.js'
 import { createStarField, createCelestialMapPlane } from './StarFieldBackground.js'
-import { bindInteractions, SimpleOrbitControls } from './interaction.js'
+import { bindInteractions, SimpleOrbitControls, flyToNode } from './interaction.js'
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
@@ -237,6 +237,36 @@ onBeforeUnmount(() => {
   renderer?.dispose?.()
   renderer?.domElement?.parentNode?.removeChild(renderer.domElement)
 })
+
+// ============================================================
+// M7 联动：子图节点双击 → 主画布相机飞向
+// ============================================================
+function findNodeById(id) {
+  if (!nodesGroup || !id) return null
+  for (const child of nodesGroup.children) {
+    if (child.userData?.type !== 'person') continue
+    const u = child.userData
+    if (u.id === id || u.uri === id) return child
+  }
+  return null
+}
+
+function flyToNodeById(id) {
+  const mesh = findNodeById(id)
+  if (!mesh) return false
+  // 还原所有 selected 状态
+  for (const child of nodesGroup.children) {
+    if (child.userData?.type === 'person' && child.userData.state === 'selected') {
+      setNodeState(child, 'idle')
+    }
+  }
+  flyToNode(camera, controls, mesh, () => {
+    setNodeState(mesh, 'selected')
+  })
+  return true
+}
+
+defineExpose({ flyToNode: flyToNodeById })
 </script>
 
 <style scoped>

@@ -15,6 +15,16 @@ from .. import config as app_config
 
 logger = logging.getLogger(__name__)
 
+
+class LLMUnavailable(Exception):
+    """LLM 服务不可用（Ollama 离线 / 拒绝连接 / 超时）。
+
+    调用方应捕获此异常走离线降级（如模板化答案）。
+    M9 RAG 降级：Generator 在 Ollama 不可用时改用 `generate_with_fallback`。
+    """
+    pass
+
+
 # Lazy-initialized global instance
 _llm_instance: Optional["OllamaClient"] = None
 
@@ -102,13 +112,16 @@ class OllamaClient:
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8") if e.fp else ""
             logger.error(f"Ollama API HTTP error {e.code}: {error_body}")
-            raise RuntimeError(f"Ollama API error: HTTP {e.code} - {error_body}")
+            raise LLMUnavailable(f"Ollama API error: HTTP {e.code} - {error_body}")
         except urllib.error.URLError as e:
             logger.error(f"Ollama connection error: {e.reason}")
-            raise RuntimeError(f"Ollama 连接失败: {e.reason}")
+            raise LLMUnavailable(f"Ollama 连接失败: {e.reason}")
+        except TimeoutError as e:
+            logger.error(f"Ollama timeout: {e}")
+            raise LLMUnavailable(f"Ollama 响应超时 ({self._timeout}s)")
         except Exception as e:
             logger.error(f"Ollama unexpected error: {e}")
-            raise RuntimeError(f"Ollama 错误: {e}")
+            raise LLMUnavailable(f"Ollama 错误: {e}")
 
     def generate(self, prompt: str, system: Optional[str] = None, **kwargs) -> str:
         """
