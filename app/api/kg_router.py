@@ -91,7 +91,7 @@ async def kg_list_persons(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/kg/persons/{name}")
+@router.get("/kg/persons/{name:path}")
 async def kg_get_person(name: str, depth: int = 1, source: str = None):
     """获取单个人物详情（含关系）
 
@@ -115,6 +115,215 @@ async def kg_get_person(name: str, depth: int = 1, source: str = None):
         raise
     except Exception as e:
         logger.error(f"Error getting person {name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/kg/person/{uri:path}/subgraph")
+async def kg_get_subgraph(uri: str, source: str = "jiapu", hops: int = 2, max_nodes: int = 80):
+    """取人物 1-2 跳子图（M7 详情面板用）。
+
+    算法：BFS 从 uri 出发，遍历 hops 跳的所有 person + 涉及的关系。
+    max_nodes 限制子图大小（防爆）。
+    """
+    try:
+        from ..database import jiapu_query
+        if source != "jiapu":
+            raise HTTPException(status_code=400, detail=f"暂只支持 jiapu 源（M7 阶段）")
+
+        # BFS
+        visited = {uri}
+        frontier = {uri}
+        edges: List[Dict] = []
+
+        for hop in range(hops):
+            new_frontier: set = set()
+            for u in frontier:
+                rels = jiapu_query.get_person_relations(u, source=source)
+                for r in rels:
+                    other = r["target"] if r["source"] == u else r["source"]
+                    edges.append({
+                        "source": r["source"],
+                        "target": r["target"],
+                        "type": r["type"],
+                    })
+                    if other not in visited and len(visited) < max_nodes:
+                        visited.add(other)
+                        new_frontier.add(other)
+            if not new_frontier:
+                break
+            frontier = new_frontier
+
+        # 查 person 详情
+        from ..database.jiapu_query import _row_to_person
+        from ..database import source_router
+        src_cfg = source_router.assert_enabled(source)
+        import sqlite3
+        conn = sqlite3.connect(str(src_cfg["path"]))
+        conn.row_factory = sqlite3.Row
+        placeholders = ",".join("?" * len(visited))
+        rows = conn.execute(
+            f"SELECT * FROM persons WHERE uri IN ({placeholders})",
+            list(visited),
+        ).fetchall()
+        nodes = [_row_to_person(r) for r in rows]
+        conn.close()
+
+        # 标记中心节点
+        for n in nodes:
+            n["is_center"] = (n["uri"] == uri)
+
+        return {
+            "status": "success",
+            "uri": uri,
+            "source": source,
+            "hops": hops,
+            "nodes": nodes,
+            "links": edges,
+            "node_count": len(nodes),
+            "link_count": len(edges),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting subgraph for {uri}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/kg/person/{uri:path}/evidence")
+async def kg_get_evidence(uri: str, name: str = None):
+    """跨源证据列表（M7 详情面板用）。
+
+    Args:
+        uri: 人物 URI（如 http://.../person/xxx）
+        name: 人物姓名（用于匹配非 jiapu 源如 memory KG）
+
+    Returns:
+        每条证据含 {source, source_label, snippet, ...}
+    """
+    try:
+        from ..database import source_router
+        evidence: List[Dict] = []
+
+        # 1. jiapu 源（取 person + 关联 works + places）
+        if source_router.is_enabled("jiapu"):
+            try:
+                from ..database import jiapu_query
+                p = jiapu_query.get_person(uri, source="jiapu")
+                if p:
+                    src_cfg = source_router.assert_enabled("jiapu")
+                    import sqlite3
+                    conn = sqlite3.connect(str(src_cfg["path"]))
+                    conn.row_factory = sqlite3.Row
+                    # 关联 works
+                    work_rows = conn.execute(
+                        """SELECT w.title, w.description FROM works w
+                           JOIN person_works pw ON w.work_uri = pw.work_uri
+                           WHERE pw.person_uri = ?
+                           LIMIT 5""",
+                        (uri,),
+                    ).fetchall()
+                    for w in work_rows:
+                        snippet = w["description"] or w["title"] or ""
+                        if snippet:
+                            evidence.append({
+                                "source": "jiapu",
+                                "source_label": "上海图书馆家谱",
+                                "title": w["title"],
+                                "snippet": snippet[:300],
+                                "evidence_type": "work_description",
+                            })
+                    # places
+                    place_rows = conn.execute(
+                        """SELECT pl.label_chs, pl.description FROM places pl
+                           JOIN person_places pp ON pl.uri = pp.place_uri
+                           WHERE pp.person_uri = ?
+                           LIMIT 5""",
+                        (uri,),
+                    ).fetchall()
+                    for pl in place_rows:
+                        snippet = pl["description"] or pl["label_chs"] or ""
+                        if snippet:
+                            evidence.append({
+                                "source": "jiapu",
+                                "source_label": "上海图书馆家谱",
+                                "title": pl["label_chs"],
+                                "snippet": snippet[:300],
+                                "evidence_type": "place_record",
+                            })
+                    conn.close()
+            except Exception as e:
+                logger.warning(f"jiapu evidence for {uri} failed: {e}")
+
+        # 2. memory KG 源（按 name 匹配）
+        if name:
+            try:
+                from ..database.kg_service import KnowledgeGraphService
+                svc = KnowledgeGraphService()
+                person = svc.get_person_with_relations(name, depth=0)
+                if person and person.get("biography"):
+                    evidence.append({
+                        "source": "memory",
+                        "source_label": "内储知识图谱",
+                        "title": name,
+                        "snippet": person["biography"][:300],
+                        "evidence_type": "biography",
+                    })
+            except Exception as e:
+                logger.warning(f"memory evidence for {name} failed: {e}")
+
+        # 3. RAG chunks 源（按 name 搜最近 chunks）
+        if name:
+            try:
+                from app.rag.rag_service import get_rag_service
+                rag = get_rag_service()
+                embedder = rag._get_embedder()
+                qvec = embedder.encode_query(f"{name} 生平")
+                retriever = rag._get_retriever()
+                retrieved = retriever.retrieve(
+                    query=f"{name} 生平",
+                    query_vector=qvec,
+                    top_k=3,
+                )
+                for r in retrieved:
+                    evidence.append({
+                        "source": "rag",
+                        "source_label": "RAG 检索片段",
+                        "title": r.get("chapter_title") or r.get("title", ""),
+                        "snippet": r.get("text", "")[:300],
+                        "score": r.get("distance", 0),
+                        "evidence_type": "rag_chunk",
+                    })
+            except Exception as e:
+                logger.warning(f"rag evidence for {name} failed: {e}")
+
+        return {
+            "status": "success",
+            "uri": uri,
+            "name": name,
+            "evidence": evidence,
+            "count": len(evidence),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting evidence for {uri}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/kg/person/{uri:path}/rag")
+async def kg_person_rag(uri: str, q: str, name: str = None, top_k: int = 3):
+    """人物限定 RAG（M7 详情面板用）。
+
+    把人物姓名 + 用户问句拼成 query 检索。
+    """
+    try:
+        from app.rag.rag_service import get_rag_service
+        rag = get_rag_service()
+        query = f"{name or uri}：{q}" if name else q
+        result = rag.ask(query, top_k=top_k)
+        return {"status": "success", **result}
+    except Exception as e:
+        logger.error(f"Error in person RAG for {uri}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -74,11 +74,12 @@
       </div>
     </div>
 
-    <!-- 节点详情面板（M7 预占位，M7 阶段实现） -->
+    <!-- 节点详情面板（M7：名片 + 子图 + 证据 + RAG） -->
     <PersonPanel
       v-if="selectedNode"
       :person="selectedNode"
       @close="selectedNode = null"
+      @navigate="onNavigate"
     />
   </div>
 </template>
@@ -190,6 +191,17 @@ function onNodeClick(node) {
 
 function onBackgroundClick() {
   selectedNode.value = null
+}
+
+function onNavigate(nodeData) {
+  // 子图节点点击 → 切到该人物
+  selectedNode.value = {
+    id: nodeData.id,
+    name: nodeData.name,
+    dynasty: nodeData.dynasty,
+    region: '',
+    category: nodeData.category ?? 2,
+  }
 }
 
 onMounted(async () => {

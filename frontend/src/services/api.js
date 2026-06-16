@@ -131,6 +131,25 @@ export const kgAPI = {
   },
 
   listSources: () => apiClient.get('/kg/sources'),
+
+  // 详情面板（M7）
+  getSubgraph: (uri, source = 'jiapu', hops = 2, maxNodes = 80) => {
+    return apiClient.get(`/kg/person/${encodeURIComponent(uri)}/subgraph`, {
+      params: { source, hops, max_nodes: maxNodes },
+    })
+  },
+
+  getEvidence: (uri, name = null) => {
+    return apiClient.get(`/kg/person/${encodeURIComponent(uri)}/evidence`, {
+      params: name ? { name } : {},
+    })
+  },
+
+  personRAG: (uri, q, name = null, topK = 3) => {
+    return apiClient.get(`/kg/person/${encodeURIComponent(uri)}/rag`, {
+      params: { q, name, top_k: topK },
+    })
+  },
 }
 
 export default {
