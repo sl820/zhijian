@@ -20,12 +20,28 @@ router = APIRouter(prefix="/api/v1")
 # ============================================================
 
 @router.post("/rag/ask", response_model=RAGResponse)
-async def rag_ask(request: RAGRequest):
-    """RAG 智能问答接口"""
+async def rag_ask(request: RAGRequest, source: str = None):
+    """RAG 智能问答接口
+
+    Args:
+        request: 问题 + top_k
+        source: 数据源过滤（"jiapu" / "memory" / None=全源）。
+            None 或 "all"：跨所有 collection 检索。
+    """
     try:
-        logger.info(f"RAG question: {request.question}")
+        logger.info(f"RAG question: {request.question} (source={source})")
         rag_service = get_rag_service()
-        result = rag_service.ask(question=request.question, top_k=request.top_k)
+
+        if source:
+            # 按 source 路由到对应 collection
+            result = rag_service.ask_by_source(
+                question=request.question,
+                source=source,
+                top_k=request.top_k,
+            )
+        else:
+            result = rag_service.ask(question=request.question, top_k=request.top_k)
+
         return RAGResponse(
             answer=result.get("answer", ""),
             sources=result.get("sources", []),
@@ -126,16 +142,7 @@ async def rag_status():
         vector_client = rag_service._get_retriever().vector_client
         rag_service._get_generator()
 
-        collections = []
-        for name in ["gazetteer_chunks"]:
-            if vector_client.has_collection(name):
-                try:
-                    col = vector_client.get_collection(name)
-                    collections.append({"name": name, "count": col.count(), "exists": True})
-                except Exception:
-                    collections.append({"name": name, "exists": True, "count": "unknown"})
-            else:
-                collections.append({"name": name, "exists": False, "count": 0})
+        collections = rag_service.list_collections()
 
         try:
             embedder = rag_service._get_embedder()
@@ -171,6 +178,18 @@ async def rag_status():
     except Exception as e:
         logger.error(f"Error in RAG status: {e}")
         return {"status": "error", "error": str(e), "collections": [], "embedder": "unknown"}
+
+
+@router.get("/rag/sources")
+async def rag_sources():
+    """列出所有 RAG 数据源（=zhijian_* collections）。"""
+    try:
+        rag_service = get_rag_service()
+        collections = rag_service.list_collections()
+        return {"status": "success", "collections": collections}
+    except Exception as e:
+        logger.error(f"Error in RAG sources: {e}")
+        return {"status": "error", "error": str(e), "collections": []}
 
 
 # ============================================================

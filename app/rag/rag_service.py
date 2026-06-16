@@ -295,6 +295,108 @@ class RAGService:
 
         return result
 
+    def ask_by_source(self, question: str, source: str,
+                      top_k: int = None) -> Dict:
+        """按数据源查询（M8）。
+
+        Args:
+            question: 用户问题
+            source: 数据源名（"jiapu" / "memory" / "all"）
+                - "all" 或 None：跨所有 collection 检索
+                - 其它：仅在 `zhijian_{source}` collection 检索
+            top_k: Top-K 结果数
+
+        Returns:
+            ask() 的返回结构
+        """
+        retriever = self._get_retriever()
+        vector_client = retriever.vector_client
+
+        # 列出可用 collection
+        all_collections = [
+            name for name in ["zhijian_jiapu", "zhijian_memory", "zhijian_base",
+                             "zhijian_gufang", "zhijian_dimingzhi", "zhijian_gmwx",
+                             "zhijian_wkl", self.collection_name]
+            if vector_client.has_collection(name)
+        ]
+
+        if not all_collections:
+            logger.warning("没有任何 collection，返回空结果")
+
+        # 选定 collection
+        if not source or source == "all":
+            collections = all_collections
+        else:
+            target = f"zhijian_{source}"
+            if target in all_collections:
+                collections = [target]
+            else:
+                logger.warning(f"源 {source} 无 collection，返回空结果")
+                collections = []
+
+        # 跨 collection 检索：合并 top_k 结果
+        embedder = self._get_embedder()
+        query_vector = embedder.encode_query(question)
+        merged = []
+        per_coll = max(1, (top_k or self.default_top_k) // max(len(collections), 1) + 1)
+
+        for coll in collections:
+            try:
+                retrieved = retriever.retrieve(
+                    query=question,
+                    query_vector=query_vector,
+                    top_k=per_coll,
+                    collection=coll,
+                )
+                for r in retrieved:
+                    r["_collection"] = coll
+                merged.extend(retrieved)
+            except Exception as e:
+                logger.error(f"检索 {coll} 失败: {e}")
+
+        # 按距离排序取 top_k
+        merged.sort(key=lambda r: r.get("distance", 999))
+        top_k_final = top_k or self.default_top_k
+        top_results = merged[:top_k_final]
+
+        # 生成答案
+        generator = self._get_generator()
+        try:
+            answer = generator.generate(question, top_results)
+        except Exception as e:
+            logger.error(f"LLM 生成失败: {e}")
+            answer = f"[LLM 暂不可用] 检索到 {len(top_results)} 条相关片段"
+
+        return {
+            "answer": answer,
+            "sources": [
+                {
+                    "text": r.get("text", ""),
+                    "source": r.get("chapter_title", ""),
+                    "collection": r.get("_collection", ""),
+                    "score": r.get("distance", 0),
+                }
+                for r in top_results
+            ],
+            "queried_collections": collections,
+        }
+
+    def list_collections(self) -> List[Dict]:
+        """列出所有 zhijian_* collections + chunk 数。"""
+        retriever = self._get_retriever()
+        vector_client = retriever.vector_client
+        results = []
+        for name in ["zhijian_jiapu", "zhijian_memory", "zhijian_base",
+                    "zhijian_gufang", "zhijian_dimingzhi", "zhijian_gmwx",
+                    "zhijian_wkl", self.collection_name]:
+            if vector_client.has_collection(name):
+                try:
+                    col = vector_client.get_collection(name)
+                    results.append({"name": name, "count": col.count()})
+                except Exception:
+                    results.append({"name": name, "count": "unknown"})
+        return results
+
     def create_collection(self, collection_name: str = None,
                           drop_existing: bool = False) -> str:
         """
