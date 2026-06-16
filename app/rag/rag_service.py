@@ -277,9 +277,25 @@ class RAGService:
 
         logger.info(f"检索到 {len(retrieved)} 个相关片段")
 
-        # Step 3: 生成答案
+        # Step 3: 生成答案（带离线降级，M9）
         generator = self._get_generator()
-        answer = generator.generate(question, retrieved)
+        llm_unavailable = False
+        try:
+            # 预检测：Ollama 不可用直接走 fallback（避免每次失败重试 ~30s）
+            gen = self.generator
+            if gen is not None and hasattr(gen, "_ollama") and gen._ollama is not None:
+                if not gen._ollama.is_available():
+                    llm_unavailable = True
+                    logger.warning("Ollama 不可用，直接走 fallback 模板")
+                    answer = gen.generate_with_fallback(question, retrieved)
+                else:
+                    answer = gen.generate(question, retrieved)
+            else:
+                answer = gen.generate(question, retrieved)
+        except Exception as e:
+            logger.error(f"LLM 生成失败: {e}")
+            llm_unavailable = True
+            answer = gen.generate_with_fallback(question, retrieved) if gen else "LLM 暂不可用"
 
         result = {
             "answer": answer,
@@ -290,7 +306,8 @@ class RAGService:
                     "score": r.get("distance", 0),
                 }
                 for r in retrieved
-            ] if return_sources else []
+            ] if return_sources else [],
+            "llm_unavailable": llm_unavailable,
         }
 
         return result
@@ -359,13 +376,24 @@ class RAGService:
         top_k_final = top_k or self.default_top_k
         top_results = merged[:top_k_final]
 
-        # 生成答案
+        # 生成答案（带离线降级）
         generator = self._get_generator()
+        llm_unavailable = False
         try:
-            answer = generator.generate(question, top_results)
+            gen = self.generator
+            if gen is not None and hasattr(gen, "_ollama") and gen._ollama is not None:
+                if not gen._ollama.is_available():
+                    llm_unavailable = True
+                    logger.warning("Ollama 不可用，走 fallback 模板")
+                    answer = gen.generate_with_fallback(question, top_results)
+                else:
+                    answer = gen.generate(question, top_results)
+            else:
+                answer = gen.generate(question, top_results)
         except Exception as e:
             logger.error(f"LLM 生成失败: {e}")
-            answer = f"[LLM 暂不可用] 检索到 {len(top_results)} 条相关片段"
+            llm_unavailable = True
+            answer = gen.generate_with_fallback(question, top_results) if gen else f"[LLM 暂不可用] 检索到 {len(top_results)} 条相关片段"
 
         return {
             "answer": answer,
@@ -379,6 +407,7 @@ class RAGService:
                 for r in top_results
             ],
             "queried_collections": collections,
+            "llm_unavailable": llm_unavailable,
         }
 
     def list_collections(self) -> List[Dict]:
