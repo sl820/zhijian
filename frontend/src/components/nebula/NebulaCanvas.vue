@@ -51,6 +51,22 @@ let interactions
 const nodePositions = new Map()
 let resizeObserver
 
+// ============================================================
+// M6 性能优化：视锥裁剪 + zoom-level 密度过滤
+// ============================================================
+// 视锥对象（每帧从相机投影矩阵构建）
+const _frustum = new THREE.Frustum()
+const _projMatrix = new THREE.Matrix4()
+
+// 相机距离变化检测：只在显著移动时才重算（避免每帧扫描所有节点）
+let _lastCullCamPos = new THREE.Vector3(NaN, NaN, NaN)
+let _lastCullTarget = new THREE.Vector3(NaN, NaN, NaN)
+const CULL_DIST_THRESHOLD = 0.5  // 相机移动超过 0.5 单位才重算
+
+// 节点 importance rank（节点数 > 阈值时按 degree 排序，仅渲染前 N）
+const DENSITY_THRESHOLD = 800    // < 800 节点全部渲染
+const DENSITY_FAR_PCT = 0.35     // 远距离时只保留 35% 节点（按 importance）
+
 // 坐标归一化参数（FA2 输出通常在 [-1, 1]，需映射到合理的世界坐标）
 const WORLD_SCALE = 18
 
@@ -200,6 +216,102 @@ function buildScene() {
   for (const child of edgesObj.children) {
     edgesGroup.add(child)
   }
+
+  // M6: 计算节点 importance 排名 + 包围球（视锥裁剪用）
+  buildImportanceAndSpheres()
+
+  // 重置 cull 状态，强制下一帧重算
+  _lastCullCamPos.set(NaN, NaN, NaN)
+  _lastCullTarget.set(NaN, NaN, NaN)
+}
+
+/**
+ * M6 性能优化：
+ * - importance: 节点 degree（被多少条边连接）
+ * - _rank: 排序后位置（0 = 最重要）
+ * - _sphere: 节点包围球（视锥裁剪用，避免每帧 allocate）
+ */
+function buildImportanceAndSpheres() {
+  const degree = new Map()
+  for (const e of props.edges) {
+    degree.set(e.source, (degree.get(e.source) || 0) + 1)
+    degree.set(e.target, (degree.get(e.target) || 0) + 1)
+  }
+  // 也算 self-loop（节点的"重要度"至少 = 边数）
+  for (const child of nodesGroup.children) {
+    if (child.userData?.type !== 'person') continue
+    const id = child.userData.id || child.userData.uri
+    if (!degree.has(id)) degree.set(id, 0)
+  }
+  // 排序（按 degree 降序）
+  const sorted = [...nodesGroup.children].sort((a, b) => {
+    const ai = degree.get(a.userData.id || a.userData.uri) || 0
+    const bi = degree.get(b.userData.id || b.userData.uri) || 0
+    return bi - ai
+  })
+  // 写 rank + sphere
+  sorted.forEach((n, i) => {
+    n.userData._rank = i
+    const cat = n.userData.category ?? 2
+    const r = cat === 0 ? 1.2 : 0.7  // category 0（氏族）大节点，半径更大
+    n.userData._sphere = new THREE.Sphere(n.position.clone(), r)
+  })
+}
+
+/**
+ * M6 视锥裁剪 + zoom-level 密度过滤。
+ *
+ * 算法：
+ * 1. 节点数 < DENSITY_THRESHOLD (800) → 全部候选
+ * 2. 否则按相机距离插值：近 = 100%、远 = 35%
+ * 3. 候选节点再做视锥裁剪：不在视锥内的 visible=false
+ *
+ * 性能：仅当相机移动 > CULL_DIST_THRESHOLD 时重算（其它帧沿用上次的可见性）
+ */
+function applyCulling() {
+  if (!nodesGroup || !nodesGroup.children.length) return
+  if (!camera || !controls) return
+
+  const camPos = camera.position
+  const target = controls.target || new THREE.Vector3()
+  // 仅当相机显著移动时才重算
+  if (
+    camPos.distanceTo(_lastCullCamPos) < CULL_DIST_THRESHOLD &&
+    target.distanceTo(_lastCullTarget) < CULL_DIST_THRESHOLD
+  ) {
+    return  // 沿用上次的 visible 状态
+  }
+  _lastCullCamPos.copy(camPos)
+  _lastCullTarget.copy(target)
+
+  // 1. 密度过滤：按相机距离决定保留多少节点
+  const total = nodesGroup.children.length
+  let visibleCount = total
+  if (total > DENSITY_THRESHOLD) {
+    const camDist = camPos.distanceTo(target)
+    // camDist ∈ [4, 80] → t ∈ [0, 1]
+    const t = Math.max(0, Math.min(1, (camDist - 4) / 50))
+    // 远 = DENSITY_FAR_PCT，近 = 100%
+    const pct = 1 - t * (1 - DENSITY_FAR_PCT)
+    visibleCount = Math.max(100, Math.floor(total * pct))
+  }
+
+  // 2. 视锥裁剪
+  _projMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+  _frustum.setFromProjectionMatrix(_projMatrix)
+
+  for (const n of nodesGroup.children) {
+    if (n.userData?._rank >= visibleCount) {
+      n.visible = false
+      continue
+    }
+    const sphere = n.userData?._sphere
+    if (!sphere) {
+      n.visible = true
+      continue
+    }
+    n.visible = _frustum.intersectsSphere(sphere)
+  }
 }
 
 function animate() {
@@ -218,6 +330,10 @@ function animate() {
   }
 
   controls?.update?.()
+
+  // M6 视锥裁剪 + 密度过滤（在 render 前应用）
+  applyCulling()
+
   renderer.render(scene, camera)
 }
 

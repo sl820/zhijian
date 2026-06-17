@@ -13,6 +13,21 @@
     <div ref="chartRef" class="subgraph-chart" v-show="!loading"></div>
     <div v-if="loading" class="subgraph-loading">载录中...</div>
     <div v-if="!loading && !nodeCount" class="subgraph-empty">无关联人物</div>
+    <div v-if="!loading && linkCount" class="subgraph-legend">
+      <span
+        v-for="(count, type) in relationCounts"
+        :key="type"
+        class="legend-chip"
+        :title="`${type}: ${count}`"
+      >
+        <span
+          class="legend-dot"
+          :style="{ background: relationStyle(type).color }"
+        ></span>
+        <span class="legend-label">{{ relationStyle(type).label }}</span>
+        <span class="legend-count">{{ count }}</span>
+      </span>
+    </div>
   </div>
 </template>
 
@@ -27,6 +42,23 @@ echarts.use([GraphChart, TooltipComponent, TitleComponent, CanvasRenderer])
 
 import { PALETTE, CATEGORY_COLORS } from '../../constants/palette.js'
 
+// 关系类型 → 视觉编码（M7 子图边分色）
+// jiupu DB 实际只有 spouseOf / parentOf / childOf 三类；
+// 兼容未来扩展（兄弟/师徒/同僚）预留 default
+const RELATION_STYLE = {
+  spouseOf: { color: PALETTE.vermilion.main,  width: 2.0, opacity: 0.85, label: '夫妻' },
+  parentOf: { color: PALETTE.gold.main,        width: 1.8, opacity: 0.80, label: '父→子' },
+  childOf:  { color: PALETTE.family,           width: 1.8, opacity: 0.80, label: '子→父' },
+  siblingOf:{ color: PALETTE.rice.dim,         width: 1.4, opacity: 0.70, label: '兄弟' },
+  studentOf:{ color: PALETTE.official,         width: 1.4, opacity: 0.65, label: '师徒' },
+  colleagueOf:{ color: PALETTE.ink.pale,       width: 1.2, opacity: 0.60, label: '同僚' },
+}
+const DEFAULT_REL_STYLE = { color: PALETTE.ink.light, width: 1.2, opacity: 0.7, label: '关联' }
+
+function relationStyle(type) {
+  return RELATION_STYLE[type] || DEFAULT_REL_STYLE
+}
+
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
   links: { type: Array, default: () => [] },
@@ -40,6 +72,16 @@ let chart
 
 const nodeCount = computed(() => props.nodes.length)
 const linkCount = computed(() => props.links.length)
+
+// 关系类型分布（用于图例 / tooltip 提示）
+const relationCounts = computed(() => {
+  const m = {}
+  for (const l of props.links) {
+    const k = l.type || 'unknown'
+    m[k] = (m[k] || 0) + 1
+  }
+  return m
+})
 
 function buildOption() {
   const symbolSize = (val) => {
@@ -68,7 +110,11 @@ function buildOption() {
           return `<b style="color:${PALETTE.gold.main}">${p.data.name}</b><br/>` +
                  `<span style="color:${PALETTE.rice.dim}">${p.data.dynasty || ''} ${p.data.role_of_family || ''}</span>`
         }
-        return `<span style="color:${PALETTE.rice.dim}">${p.data.type || '关联'}</span>`
+        // 关系边 tooltip：显示关系类型 + 标签
+        const st = relationStyle(p.data.type)
+        return `<span style="color:${st.color}">━</span> ` +
+               `<span style="color:${PALETTE.rice.main}">${st.label}</span> ` +
+               `<span style="color:${PALETTE.rice.dim}">(${p.data.type || '关联'})</span>`
       },
     },
     animationDurationUpdate: 800,
@@ -95,17 +141,20 @@ function buildOption() {
           fontWeight: n.is_center ? 600 : 400,
         },
       })),
-      links: props.links.map(l => ({
-        source: l.source,
-        target: l.target,
-        type: l.type,
-        lineStyle: {
-          color: PALETTE.ink.light,
-          width: 1.2,
-          opacity: 0.7,
-          curveness: 0.1,
-        },
-      })),
+      links: props.links.map(l => {
+        const st = relationStyle(l.type)
+        return {
+          source: l.source,
+          target: l.target,
+          type: l.type,
+          lineStyle: {
+            color: st.color,
+            width: st.width,
+            opacity: st.opacity,
+            curveness: 0.15,
+          },
+        }
+      }),
       force: {
         repulsion: 220,
         edgeLength: [60, 110],
@@ -114,7 +163,7 @@ function buildOption() {
       },
       emphasis: {
         focus: 'adjacency',
-        lineStyle: { width: 2.5, color: PALETTE.gold.main },
+        lineStyle: { width: 3.0, color: PALETTE.gold.bright },
       },
     }],
   }
@@ -199,5 +248,40 @@ function resizeChart() {
   font-size: 12px;
   color: var(--xingye-ink-pale);
   letter-spacing: 0.2em;
+}
+
+.subgraph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--xingye-ink-light);
+}
+
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--xingye-font-display);
+  font-size: 11px;
+  color: var(--xingye-rice-dim);
+  letter-spacing: 0.08em;
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+}
+
+.legend-label {
+  color: var(--xingye-rice-main);
+}
+
+.legend-count {
+  color: var(--xingye-ink-pale);
+  font-variant-numeric: tabular-nums;
 }
 </style>
