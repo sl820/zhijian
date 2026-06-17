@@ -110,7 +110,15 @@ def get_layout_subset(
             conn = sqlite3.connect(str(src_cfg["path"]))
             conn.row_factory = sqlite3.Row
             # M6 时间轴：birthday 列携带数字年（如 "1628"）或中文日期，前端按年映射朝代
-            for r in conn.execute("SELECT uri, label_chs, description, birthday FROM persons"):
+            # WHERE 过滤空值：2M → ~260k，省 7x 时间
+            # SELECT 覆盖 PERSON_FIELD_MAP 全部列（否则 _row_to_person IndexError 会被外层 try 静默吞掉，
+            # 导致 person_meta 永远是空 dict，name 全部回退到 URI tail）
+            for r in conn.execute("""
+                SELECT uri, label_chs, label_cht, label_en, family_name, role_of_family,
+                       courtesy_name, description, gender, birthday
+                FROM persons
+                WHERE birthday IS NOT NULL AND birthday != ''
+            """):
                 from .jiapu_query import _row_to_person
                 p = _row_to_person(r)
                 # 解析 birth_year：纯数字才返回 int，否则 None
