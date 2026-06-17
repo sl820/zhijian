@@ -1,19 +1,28 @@
 <!--
   志鉴·星野图考 人物名片
-  朱砂印章式姓名 + 朝代生卒 + 籍贯 + 官职 + 家族 + 史源标签
+  64x64 圆形篆书头像 + 朱砂姓名 + 朝代生卒 + 籍贯 + 官职 + 家族 + 史源标签
 
   Why：M7 详情面板核心。名片要做到"一望可知此人来历"。
+  头像字符按 category 映射：
+    0 姓氏族   → 姓首字（family_name?.[0]）
+    1 妻妾     → 「女」
+    2 其它     → 「人」
+    3 官吏·文人 → 「文」
+  无 category 时回退到姓名首字。
+  真实头像后续接 Wikipedia / 百度百科。
 -->
 <template>
   <div class="person-card">
-    <!-- 朱砂印章 -->
-    <div class="card-seal">
-      <div class="seal-name">{{ name }}</div>
-      <div class="seal-line">史</div>
+    <!-- 64x64 圆形篆书头像 -->
+    <div class="card-avatar" :data-category="categoryLabel">
+      <span class="avatar-char">{{ avatarChar }}</span>
+      <span class="avatar-ring" aria-hidden="true"></span>
     </div>
 
-    <!-- 基本信息 -->
+    <!-- 主体：姓名 + 信息行 + 史源 -->
     <div class="card-body">
+      <div class="card-name">{{ name }}</div>
+
       <div class="card-row" v-if="dynasty">
         <span class="row-label">朝代</span>
         <span class="row-value dynasty">{{ dynasty }}</span>
@@ -39,7 +48,6 @@
         <span class="row-value">{{ role_of_family }}</span>
       </div>
 
-      <!-- 史源标签 -->
       <div class="card-sources" v-if="sourceLabel">
         <span class="source-tag">史源 · {{ sourceLabel }}</span>
       </div>
@@ -48,8 +56,11 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
+
 const props = defineProps({
   name: { type: String, required: true },
+  category: { type: Number, default: null },
   dynasty: { type: String, default: '' },
   years: { type: String, default: '' },
   region: { type: String, default: '' },
@@ -57,6 +68,23 @@ const props = defineProps({
   family_name: { type: String, default: '' },
   role_of_family: { type: String, default: '' },
   sourceLabel: { type: String, default: '' },
+})
+
+// 头像字符：姓氏族=姓首字 / 妻=女 / 官吏=文 / 其它=人；无 category 时回退姓名首字
+const avatarChar = computed(() => {
+  if (props.category === 0 && props.family_name) return props.family_name.charAt(0)
+  if (props.category === 1) return '女'
+  if (props.category === 3) return '文'
+  if (props.category === 2 || props.category === null || props.category === undefined) {
+    if (props.category === 2) return '人'
+    // 兜底：姓名首字（不知道 category 时）
+    return (props.name || '？').charAt(0)
+  }
+  return (props.name || '？').charAt(0)
+})
+
+const categoryLabel = computed(() => {
+  return ['clan', 'consort', 'other', 'official'][props.category ?? 2] || 'other'
 })
 </script>
 
@@ -66,57 +94,91 @@ const props = defineProps({
 .person-card {
   position: relative;
   display: flex;
-  gap: 16px;
+  gap: 14px;
   align-items: flex-start;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--xingye-ink-light);
 }
 
-/* 朱砂印章 */
-.card-seal {
+/* === 64x64 圆形篆书头像 === */
+.card-avatar {
   position: relative;
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   flex-shrink: 0;
-  border: 2.5px solid var(--xingye-vermilion-seal);
-  border-radius: 4px;
-  background: rgba(168, 42, 31, 0.15);
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--xingye-glow-vermilion);
-  transform: rotate(-3deg);
+  background: radial-gradient(circle at 35% 30%,
+    var(--xingye-vermilion-seal) 0%,
+    var(--xingye-vermilion-main) 60%,
+    var(--xingye-vermilion-deep) 100%);
+  box-shadow:
+    inset 0 0 6px rgba(0, 0, 0, 0.25),
+    0 0 14px rgba(232, 72, 48, 0.5);
+  overflow: hidden;
 }
 
-.seal-name {
+.avatar-char {
   font-family: var(--xingye-font-display);
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--xingye-vermilion-bright);
-  letter-spacing: 0.05em;
-  text-shadow: 0 0 8px rgba(232, 72, 48, 0.6);
+  font-size: 30px;
+  font-weight: 800;
+  color: var(--xingye-rice-bright);
+  text-shadow:
+    0 0 6px rgba(240, 232, 212, 0.8),
+    0 1px 2px rgba(0, 0, 0, 0.7);
   z-index: 1;
+  line-height: 1;
+  letter-spacing: -0.02em;
 }
 
-.seal-line {
+/* 外圈金粉环 */
+.avatar-ring {
   position: absolute;
-  inset: 4px;
-  border: 1px solid var(--xingye-vermilion-deep);
-  border-radius: 2px;
+  inset: 2px;
+  border: 2px solid var(--xingye-gold-main);
+  border-radius: 50%;
   pointer-events: none;
+  opacity: 0.85;
 }
 
-/* 基本信息 */
+/* 官吏·文人 用米白底朱砂字（区别于朱砂底米白字） */
+.card-avatar[data-category="official"] {
+  background: radial-gradient(circle at 30% 30%,
+    var(--xingye-rice-main) 0%,
+    var(--xingye-rice-dim) 100%);
+  box-shadow:
+    inset 0 0 8px rgba(0, 0, 0, 0.2),
+    0 0 10px rgba(240, 232, 212, 0.3);
+}
+.card-avatar[data-category="official"] .avatar-char {
+  color: var(--xingye-vermilion-bright);
+  text-shadow: 0 0 3px rgba(232, 72, 48, 0.5);
+}
+
+/* === 主体 === */
 .card-body {
   flex: 1;
   min-width: 0;
+}
+
+.card-name {
+  font-family: var(--xingye-font-display);
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--xingye-vermilion-bright);
+  letter-spacing: 0.08em;
+  text-shadow: 0 0 8px rgba(232, 72, 48, 0.4);
+  margin-bottom: 6px;
+  line-height: 1.2;
 }
 
 .card-row {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  padding: 3px 0;
+  padding: 2px 0;
 }
 
 .row-label {

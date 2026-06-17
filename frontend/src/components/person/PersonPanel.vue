@@ -25,6 +25,7 @@
       <!-- 名片 -->
       <PersonCard
         :name="displayName"
+        :category="detail.person_type ?? person.category ?? null"
         :dynasty="detail.dynasty || person.dynasty"
         :years="detail.years"
         :region="detail.region"
