@@ -92,15 +92,21 @@ export function createPersonNode(node) {
 export function setNodeState(nodeGroup, state) {
   const isHover = state === 'hover'
   const isSelected = state === 'selected'
+  // M6 时间轴：朝代淡化乘子（0.15 ~ 1.0），NebulaCanvas 每帧 lerp 后写入这里
+  const dynMul = nodeGroup.userData._dynMul ?? 1.0
 
   nodeGroup.children.forEach((child) => {
     if (child.material && child.material.opacity !== undefined) {
+      let baseOpacity
       if (child.material.blending === THREE.AdditiveBlending) {
         // 光晕：hover/selected 时变大变亮
-        child.material.opacity = isHover ? 0.45 : isSelected ? 0.6 : 0.18
+        baseOpacity = isHover ? 0.45 : isSelected ? 0.6 : 0.18
       } else {
-        child.material.opacity = isHover ? 1.0 : isSelected ? 1.0 : 0.92
+        baseOpacity = isHover ? 1.0 : isSelected ? 1.0 : 0.92
       }
+      // 缓存基础不透明度（NebulaCanvas 每帧会乘 dynMul 再覆盖）
+      child.userData._baseOpacity = baseOpacity
+      child.material.opacity = baseOpacity * dynMul
     }
     if (child.material && child.material.color) {
       const baseColor = child.userData.baseColor

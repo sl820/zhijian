@@ -109,13 +109,23 @@ def get_layout_subset(
             import sqlite3
             conn = sqlite3.connect(str(src_cfg["path"]))
             conn.row_factory = sqlite3.Row
-            for r in conn.execute("SELECT uri, label_chs, description FROM persons"):
+            # M6 时间轴：birthday 列携带数字年（如 "1628"）或中文日期，前端按年映射朝代
+            for r in conn.execute("SELECT uri, label_chs, description, birthday FROM persons"):
                 from .jiapu_query import _row_to_person
                 p = _row_to_person(r)
+                # 解析 birth_year：纯数字才返回 int，否则 None
+                raw_birthday = (r["birthday"] or "").strip()
+                birth_year = None
+                if raw_birthday and raw_birthday.replace("-", "").isdigit():
+                    try:
+                        birth_year = int(raw_birthday)
+                    except ValueError:
+                        birth_year = None
                 person_meta[p["uri"]] = {
                     "name": p.get("name", ""),
                     "category": p.get("person_type", 2),
                     "biography": (p.get("biography") or "")[:120],
+                    "birth_year": birth_year,
                 }
             conn.close()
     except Exception:
@@ -150,7 +160,7 @@ def get_layout_subset(
     # 4. 按 offset/limit 切片
     slice_indices = visible_indices[offset:offset + limit]
 
-    # 5. 构建节点（含 name/category/biography 给前端用）
+    # 5. 构建节点（含 name/category/biography/birth_year 给前端用）
     nodes = []
     for i in slice_indices:
         uri = str(node_ids[i])
@@ -163,6 +173,7 @@ def get_layout_subset(
             "name": meta.get("name") or uri.split("/")[-1],
             "category": meta.get("category", 2),
             "biography": meta.get("biography", ""),
+            "birth_year": meta.get("birth_year"),
         })
 
     # 6. 构建边（只保留两端都在当前返回的节点中）

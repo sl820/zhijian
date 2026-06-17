@@ -58,6 +58,7 @@
       :nodes="layoutNodes"
       :edges="layoutEdges"
       :loading="loading"
+      :active-dynasties="activeDynasties"
       @node-click="onNodeClick"
       @background-click="onBackgroundClick"
     />
@@ -106,12 +107,22 @@
       @close="selectedNode = null"
       @navigate="onNavigate"
     />
+
+    <!-- M6 朝代时间轴 -->
+    <DynastyTimeline
+      v-if="layoutNodes.length"
+      :counts="dynastyCounts"
+      :active="activeDynasties"
+      :labels="dynastyLabels"
+      @toggle="onToggleDynasty"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import NebulaCanvas from '../components/nebula/NebulaCanvas.vue'
+import DynastyTimeline from '../components/nebula/DynastyTimeline.vue'
 import PersonPanel from '../components/person/PersonPanel.vue'
 import { kgAPI } from '../services/api.js'
 import { PALETTE, CATEGORY_COLORS, CATEGORY_NAMES } from '../constants/palette.js'
@@ -135,6 +146,69 @@ const filterCategory = ref(null)
 const filterDynasty = ref('')
 const totalInBbox = ref(0)
 const totalUnfiltered = ref(0)
+
+// M6 时间轴：朝代标签 + 激活集合（null = 全激活）
+const dynastyLabels = [
+  { id: 'pre_han',   label: '汉前/汉' },
+  { id: 'three_jin', label: '三国/晋' },
+  { id: 'north_sou', label: '南北朝' },
+  { id: 'sui',       label: '隋' },
+  { id: 'tang',      label: '唐' },
+  { id: 'five_dyn',  label: '五代' },
+  { id: 'song',      label: '宋' },
+  { id: 'yuan',      label: '元' },
+  { id: 'ming',      label: '明' },
+  { id: 'qing',      label: '清' },
+  { id: 'modern',    label: '民国+' },
+]
+// yearToDynasty：与 NebulaCanvas 内的同名函数保持一致
+function yearToDynasty(year) {
+  if (year == null || isNaN(year)) return null
+  const y = Number(year)
+  if (y < 220) return 'pre_han'
+  if (y < 420) return 'three_jin'
+  if (y < 589) return 'north_sou'
+  if (y < 618) return 'sui'
+  if (y < 907) return 'tang'
+  if (y < 960) return 'five_dyn'
+  if (y < 1279) return 'song'
+  if (y < 1368) return 'yuan'
+  if (y < 1644) return 'ming'
+  if (y < 1912) return 'qing'
+  return 'modern'
+}
+
+const activeDynasties = ref(null)  // null = 全激活
+const dynastyCounts = computed(() => {
+  const counts = {}
+  for (const n of layoutNodes.value) {
+    const dy = yearToDynasty(n.birth_year)
+    if (dy) counts[dy] = (counts[dy] || 0) + 1
+  }
+  return counts
+})
+function onToggleDynasty(id) {
+  // 状态机：null（全激活）→ 含该 id 的 Set → 不含该 id 的 Set → 全空（隐式视为"全激活"）
+  if (activeDynasties.value == null) {
+    // 第一次点击：从全激活转成"除该 id 外全激活"
+    const s = new Set(dynastyLabels.map(d => d.id))
+    s.delete(id)
+    activeDynasties.value = s
+    return
+  }
+  const s = new Set(activeDynasties.value)
+  if (s.has(id)) {
+    s.delete(id)
+  } else {
+    s.add(id)
+  }
+  // 全空 → 回到 null（全激活）
+  if (s.size === 0 || s.size === dynastyLabels.length) {
+    activeDynasties.value = null
+  } else {
+    activeDynasties.value = s
+  }
+}
 
 const filterLabel = computed(() => {
   const parts = []
@@ -198,6 +272,7 @@ async function loadLayout() {
       region: n.region || '',
       biography: n.biography || '',
       category: n.category ?? 2,
+      birth_year: n.birth_year ?? null,
     }))
     layoutEdges.value = (res.links || res.edges || []).map(e => ({
       source: e.source,

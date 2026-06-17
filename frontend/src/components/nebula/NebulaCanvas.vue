@@ -36,6 +36,8 @@ const props = defineProps({
   nodes: { type: Array, default: () => [] },
   edges: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
+  // M6 时间轴：当前激活的朝代 id 集合；null/undefined = 全部激活
+  activeDynasties: { type: [Set, Array, null], default: null },
 })
 
 const emit = defineEmits(['node-click', 'background-click'])
@@ -70,6 +72,30 @@ const DENSITY_FAR_PCT = 0.35     // 远距离时只保留 35% 节点（按 impor
 // 坐标归一化参数（FA2 输出通常在 [-1, 1]，需映射到合理的世界坐标）
 const WORLD_SCALE = 18
 
+// M6 时间轴：按 birth_year 映射到朝代 id
+// 与后端 layout_service 解析的 int year 配套
+const DYNASTY_BUCKETS = [
+  { id: 'pre_han',   label: '汉前/汉',  start: -9999, end: 220  },
+  { id: 'three_jin', label: '三国/晋',  start: 220,  end: 420  },
+  { id: 'north_sou', label: '南北朝',    start: 420,  end: 589  },
+  { id: 'sui',       label: '隋',        start: 589,  end: 618  },
+  { id: 'tang',      label: '唐',        start: 618,  end: 907  },
+  { id: 'five_dyn',  label: '五代',      start: 907,  end: 960  },
+  { id: 'song',      label: '宋',        start: 960,  end: 1279 },
+  { id: 'yuan',      label: '元',        start: 1279, end: 1368 },
+  { id: 'ming',      label: '明',        start: 1368, end: 1644 },
+  { id: 'qing',      label: '清',        start: 1644, end: 1912 },
+  { id: 'modern',    label: '民国+',     start: 1912, end: 9999 },
+]
+function yearToDynasty(year) {
+  if (year == null || isNaN(year)) return null
+  const y = Number(year)
+  for (const b of DYNASTY_BUCKETS) {
+    if (y >= b.start && y < b.end) return b.id
+  }
+  return null
+}
+
 function normalizeCoords(nodes) {
   if (!nodes.length) return nodes
   let minX = Infinity, minY = Infinity, minZ = Infinity
@@ -89,6 +115,7 @@ function normalizeCoords(nodes) {
     n._wx = ((n.x ?? 0) - cx) / range * WORLD_SCALE
     n._wy = ((n.y ?? 0) - cy) / range * WORLD_SCALE
     n._wz = ((n.z ?? 0) - cz) / range * WORLD_SCALE * 0.4  // z 压扁，避免立体感过头
+    n._dynasty = yearToDynasty(n.birth_year)
   }
   return nodes
 }
@@ -206,6 +233,9 @@ function buildScene() {
   for (const node of normalized) {
     const group = createPersonNode(node)
     group.position.set(node._wx, node._wy, node._wz)
+    // M6 时间轴：朝代淡化乘子（每帧 lerp 到 _dynMulTarget）
+    group.userData._dynMul = 1.0
+    group.userData._dynMulTarget = 1.0
     nodesGroup.add(group)
     nodePositions.set(node.id, group.position)
   }
@@ -314,6 +344,52 @@ function applyCulling() {
   }
 }
 
+/**
+ * M6 时间轴朝代淡化
+ * - activeDynasties 为 null/undefined → 全部 1.0
+ * - activeDynasties 为空 Set → 全部 0.15（视觉上"全部关闭"的状态）
+ * - 否则：节点的 _dynasty 在集合内 → 1.0；不在 → 0.15
+ * - 每年帧 lerp 到 target（dampening factor 0.18，避免突变）
+ * - 每帧重写 material.opacity = _baseOpacity * _dynMul（依赖 setNodeState 写入 _baseOpacity）
+ */
+const _activeSetCache = { ref: null, set: null }
+function getActiveSet() {
+  const ad = props.activeDynasties
+  if (ad == null) return null  // 全激活语义
+  if (ad === _activeSetCache.ref) return _activeSetCache.set
+  const s = ad instanceof Set ? ad : new Set(ad)
+  _activeSetCache.ref = ad
+  _activeSetCache.set = s
+  return s
+}
+const DYNASTY_DIM = 0.15  // 非活跃朝代的乘子（"褪色"而非"消失"）
+const DYNASTY_LERP = 0.18  // 每帧 lerp 系数（越接近 1 越快）
+
+function applyDynastyDim() {
+  if (!nodesGroup || !nodesGroup.children.length) return
+  const activeSet = getActiveSet()
+  for (const n of nodesGroup.children) {
+    if (n.userData?.type !== 'person') continue
+    const dy = n.userData._dynasty
+    // null dynasty（无生年）一律按活跃处理，避免误淡
+    const isActive = activeSet == null
+      ? true
+      : (dy == null ? true : activeSet.has(dy))
+    n.userData._dynMulTarget = isActive ? 1.0 : DYNASTY_DIM
+    // lerp 平滑过渡
+    const cur = n.userData._dynMul ?? 1.0
+    const next = cur + (n.userData._dynMulTarget - cur) * DYNASTY_LERP
+    if (Math.abs(next - cur) < 0.001) continue  // 已接近目标，跳过
+    n.userData._dynMul = next
+    // 应用到所有有 _baseOpacity 的子材质
+    for (const child of n.children) {
+      if (child.material && child.userData?._baseOpacity !== undefined) {
+        child.material.opacity = child.userData._baseOpacity * next
+      }
+    }
+  }
+}
+
 function animate() {
   animationId = requestAnimationFrame(animate)
   if (!renderer || !scene || !camera) return
@@ -334,10 +410,18 @@ function animate() {
   // M6 视锥裁剪 + 密度过滤（在 render 前应用）
   applyCulling()
 
+  // M6 时间轴朝代淡化（每帧 lerp）
+  applyDynastyDim()
+
   renderer.render(scene, camera)
 }
 
 watch(() => props.nodes, () => buildScene(), { deep: false })
+// M6 时间轴：activeDynasties 引用变化时清缓存，确保下一帧重新评估 _dynMulTarget
+watch(() => props.activeDynasties, () => {
+  _activeSetCache.ref = null
+  _activeSetCache.set = null
+})
 
 onMounted(() => {
   initThree()
