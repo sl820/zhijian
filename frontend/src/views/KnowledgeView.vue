@@ -78,6 +78,9 @@
       </button>
     </div>
 
+    <!-- 搜索提示 toast（仅搜索错误，短暂显示） -->
+    <div v-if="searchToast" class="nebula-toast">{{ searchToast }}</div>
+
     <!-- 图例 -->
     <div v-if="layoutNodes.length || totalInBbox" class="nebula-legend">
       <div class="nebula-legend-title">星宿分类</div>
@@ -138,6 +141,8 @@ const layoutNodes = ref([])
 const layoutEdges = ref([])
 const layoutMeta = ref({})
 const error = ref('')
+const searchToast = ref('')
+let searchToastTimer = null
 const selectedNode = ref(null)
 const nebulaRef = ref(null)
 
@@ -317,8 +322,19 @@ function onSearchEnter() {
   if (target) {
     onNodeClick(target)
   } else {
-    error.value = `未找到人物「${searchName.value}」`
+    const scope = layoutNodes.value.length
+    const total = totalInBbox.value || scope
+    const hint = filterCategory.value !== null || filterDynasty.value
+      ? '当前筛选条件下'
+      : `当前可见 ${scope} 颗 / 全图 ${total} 颗`
+    showSearchToast(`未找到「${searchName.value}」（${hint}）`)
   }
+}
+
+function showSearchToast(msg) {
+  searchToast.value = msg
+  if (searchToastTimer) clearTimeout(searchToastTimer)
+  searchToastTimer = setTimeout(() => { searchToast.value = '' }, 3500)
 }
 
 function onNodeClick(node) {
@@ -355,6 +371,29 @@ onMounted(async () => {
 
 <style scoped>
 @import '../styles/xingye.css';
+
+.nebula-toast {
+  position: fixed;
+  top: 90px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 10px 22px;
+  background: rgba(13, 13, 18, 0.92);
+  border: 1px solid var(--xingye-vermilion-seal);
+  border-radius: 4px;
+  color: var(--xingye-rice-main);
+  font-family: var(--xingye-font-display);
+  font-size: 13px;
+  letter-spacing: 0.15em;
+  box-shadow: 0 4px 18px rgba(194, 54, 42, 0.35);
+  animation: nebula-toast-in 0.3s ease-out;
+}
+
+@keyframes nebula-toast-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
 
 .nebula-legend-stats {
   margin-top: 8px;

@@ -176,21 +176,18 @@ function initThree() {
     onBackgroundClick: () => emit('background-click'),
   })
 
-  // Tooltip position via raycaster
+  // Tooltip position via raycaster (rel-pos to wrapper, computed each frame in animate())
   function updateTooltipPosition(node) {
-    const vector = new THREE.Vector3()
-    vector.setFromMatrixPosition(node.matrixWorld)
-    vector.project(camera)
-    const rect = renderer.domElement.getBoundingClientRect()
-    const x = (vector.x * 0.5 + 0.5) * rect.width + rect.left
-    const y = (-vector.y * 0.5 + 0.5) * rect.height + rect.top
+    if (!wrapperRef.value) return
+    const v = _tooltipVec
+    v.setFromMatrixPosition(node.matrixWorld)
+    v.project(camera)
+    const wrapperRect = wrapperRef.value.getBoundingClientRect()
+    const x = (v.x * 0.5 + 0.5) * wrapperRect.width
+    const y = (-v.y * 0.5 + 0.5) * wrapperRect.height
     tooltipPos.value = { x, y }
   }
-
-  // Hover → tooltip 跟随
-  setInterval(() => {
-    if (hoveredNode.value) updateTooltipPosition(hoveredNode.value)
-  }, 50)
+  const _tooltipVec = new THREE.Vector3()
 
   // Resize
   resizeObserver = new ResizeObserver(handleResize)
@@ -474,6 +471,9 @@ function animate() {
 
   // M6 飞白：hover 关联边 dashOffset 流光（仅更新 _highlighted=true 的边，开销小）
   if (edgesGroup) tickEdgeHighlight(edgesGroup, performance.now() * 0.001)
+
+  // Tooltip 跟随（每帧 1 次，无 setInterval）
+  if (hoveredNode.value) updateTooltipPosition(hoveredNode.value)
 
   renderer.render(scene, camera)
 }
