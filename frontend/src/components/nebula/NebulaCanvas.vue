@@ -393,30 +393,35 @@ function applyDynastyDim() {
 /**
  * M6 字号自适应：按相机距离控制 nameLabel 可见性 + 字号
  * - 距离 > LABEL_FAR：全部隐藏（避免远景文字噪声）
- * - 距离 ∈ [LABEL_NEAR, LABEL_FAR]：按 _rank 取前 30%
- * - 距离 < LABEL_NEAR：全部显示
+ * - 距离 ∈ [LABEL_NEAR, LABEL_FAR]：top 30% by rank（最多 60）
+ * - 距离 < LABEL_NEAR：top 60% by rank（最多 80）
  * - 朝代淡化（_dynMul < 0.5）→ 隐藏对应标签
  * - 字号：linear lerp 0.5（远）→ 1.2（近）
+ * - 硬上限 80 标签（避免近景 500 节点全部 label 互相遮挡）
  */
-const LABEL_NEAR = 15   // 小于此：全显示
-const LABEL_FAR = 35    // 大于此：全隐藏
+const LABEL_NEAR = 15
+const LABEL_FAR = 35
 const LABEL_SCALE_FAR = 0.5
 const LABEL_SCALE_NEAR = 1.2
+const LABEL_MAX = 80
 
 function applyLabelVisibility() {
   if (!nodesGroup || !nodesGroup.children.length || !camera || !controls) return
   const camPos = camera.position
   const target = controls.target || new THREE.Vector3()
   const dist = camPos.distanceTo(target)
+  const total = nodesGroup.children.length
 
   // 区间分段 → 决定哪些 rank 可见
-  let rankCutoff = Infinity
-  if (dist > LABEL_FAR) {
-    rankCutoff = 0  // 全部隐藏
-  } else if (dist > LABEL_NEAR) {
-    // 中距离：仅 top-30% 重要度
-    const total = nodesGroup.children.length
-    rankCutoff = Math.max(0, Math.floor(total * 0.3))
+  let rankCutoff = 0
+  if (dist <= LABEL_FAR) {
+    if (dist > LABEL_NEAR) {
+      // 中距离：top 30%
+      rankCutoff = Math.min(LABEL_MAX, Math.max(0, Math.floor(total * 0.3)))
+    } else {
+      // 近距离：top 60% (但硬上限 80)
+      rankCutoff = Math.min(LABEL_MAX, Math.max(0, Math.floor(total * 0.6)))
+    }
   }
 
   // 字号随距离缩放（远小近大）
@@ -430,11 +435,9 @@ function applyLabelVisibility() {
   for (const n of nodesGroup.children) {
     const label = n.userData?._nameLabel
     if (!label) continue
-    // 朝代淡化阈值（避免淡化朝代仍出现标签）
     const dynMul = n.userData._dynMul ?? 1.0
     const passesRank = (n.userData._rank ?? 0) < rankCutoff
     label.visible = passesRank && dynMul > 0.5
-    // 应用缩放（Sprite scale 单位世界单位）
     if (label.visible) {
       label.scale.set(2.4 * curScale, 0.6 * curScale, 1)
     }
