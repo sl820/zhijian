@@ -78,6 +78,14 @@ export function createPersonNode(node) {
   halo.position.z = -0.01
   group.add(halo)
 
+  // M6 字号自适应：名字 + 朝代 Sprite 标签（默认隐藏，由 NebulaCanvas 按相机距离控制）
+  const label = createNameLabel(node.name || '?', node.dynasty || '')
+  label.position.set(0, 1.2, 0.1)  // 节点上方
+  label.userData.isLabel = true
+  label.visible = false
+  group.add(label)
+  group.userData._nameLabel = label
+
   // 让节点正对相机（billboard）
   group.userData.billboard = true
 

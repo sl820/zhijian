@@ -390,6 +390,57 @@ function applyDynastyDim() {
   }
 }
 
+/**
+ * M6 字号自适应：按相机距离控制 nameLabel 可见性 + 字号
+ * - 距离 > LABEL_FAR：全部隐藏（避免远景文字噪声）
+ * - 距离 ∈ [LABEL_NEAR, LABEL_FAR]：按 _rank 取前 30%
+ * - 距离 < LABEL_NEAR：全部显示
+ * - 朝代淡化（_dynMul < 0.5）→ 隐藏对应标签
+ * - 字号：linear lerp 0.5（远）→ 1.2（近）
+ */
+const LABEL_NEAR = 15   // 小于此：全显示
+const LABEL_FAR = 35    // 大于此：全隐藏
+const LABEL_SCALE_FAR = 0.5
+const LABEL_SCALE_NEAR = 1.2
+
+function applyLabelVisibility() {
+  if (!nodesGroup || !nodesGroup.children.length || !camera || !controls) return
+  const camPos = camera.position
+  const target = controls.target || new THREE.Vector3()
+  const dist = camPos.distanceTo(target)
+
+  // 区间分段 → 决定哪些 rank 可见
+  let rankCutoff = Infinity
+  if (dist > LABEL_FAR) {
+    rankCutoff = 0  // 全部隐藏
+  } else if (dist > LABEL_NEAR) {
+    // 中距离：仅 top-30% 重要度
+    const total = nodesGroup.children.length
+    rankCutoff = Math.max(0, Math.floor(total * 0.3))
+  }
+
+  // 字号随距离缩放（远小近大）
+  const t = Math.max(0, Math.min(1, (LABEL_FAR - dist) / (LABEL_FAR - LABEL_NEAR)))
+  const scale = LABEL_SCALE_FAR + (LABEL_SCALE_NEAR - LABEL_SCALE_FAR) * t
+  // 平滑 lerp 避免字号突变
+  const prevScale = applyLabelVisibility._prevScale ?? scale
+  const curScale = prevScale + (scale - prevScale) * 0.18
+  applyLabelVisibility._prevScale = curScale
+
+  for (const n of nodesGroup.children) {
+    const label = n.userData?._nameLabel
+    if (!label) continue
+    // 朝代淡化阈值（避免淡化朝代仍出现标签）
+    const dynMul = n.userData._dynMul ?? 1.0
+    const passesRank = (n.userData._rank ?? 0) < rankCutoff
+    label.visible = passesRank && dynMul > 0.5
+    // 应用缩放（Sprite scale 单位世界单位）
+    if (label.visible) {
+      label.scale.set(2.4 * curScale, 0.6 * curScale, 1)
+    }
+  }
+}
+
 function animate() {
   animationId = requestAnimationFrame(animate)
   if (!renderer || !scene || !camera) return
@@ -412,6 +463,9 @@ function animate() {
 
   // M6 时间轴朝代淡化（每帧 lerp）
   applyDynastyDim()
+
+  // M6 字号自适应（按相机距离控制 label 可见性 + 字号）
+  applyLabelVisibility()
 
   renderer.render(scene, camera)
 }
