@@ -28,7 +28,7 @@ import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import * as THREE from 'three'
 import { PALETTE } from '../../constants/palette.js'
 import { createPersonNode, setNodeState, createNameLabel } from './PersonNode.js'
-import { createRelationEdges, highlightEdgesForNode } from './RelationEdge.js'
+import { createRelationEdges, highlightEdgesForNode, setLineMaterialsResolution, tickEdgeHighlight, disposeLineMaterials } from './RelationEdge.js'
 import { createStarField, createCelestialMapPlane } from './StarFieldBackground.js'
 import { bindInteractions, SimpleOrbitControls, flyToNode } from './interaction.js'
 
@@ -204,6 +204,8 @@ function handleResize() {
   camera.aspect = w / h
   camera.updateProjectionMatrix()
   renderer.setSize(w, h)
+  // M6 飞白：Line2 粗线在屏幕空间宽度依赖 resolution，必须同步
+  setLineMaterialsResolution(w, h)
 }
 
 function buildScene() {
@@ -470,6 +472,9 @@ function animate() {
   // M6 字号自适应（按相机距离控制 label 可见性 + 字号）
   applyLabelVisibility()
 
+  // M6 飞白：hover 关联边 dashOffset 流光（仅更新 _highlighted=true 的边，开销小）
+  if (edgesGroup) tickEdgeHighlight(edgesGroup, performance.now() * 0.001)
+
   renderer.render(scene, camera)
 }
 
@@ -493,6 +498,8 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   renderer?.dispose?.()
   renderer?.domElement?.parentNode?.removeChild(renderer.domElement)
+  // M6 飞白：释放所有 LineMaterial（_allMaterials Set）
+  disposeLineMaterials()
 })
 
 // ============================================================

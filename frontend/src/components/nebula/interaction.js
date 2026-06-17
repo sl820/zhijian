@@ -58,12 +58,12 @@ export function bindInteractions(ctx) {
       // 还原上一个
       if (hoveredNode && hoveredNode.userData.state !== 'selected') {
         setNodeState(hoveredNode, 'idle')
-        if (edgesGroup) highlightEdgesForNode(edgesGroup, hoveredNode.userData.id, false)
+        if (edgesGroup) highlightEdgesForNode(edgesGroup, hoveredNode.userData.id, false, performance.now() * 0.001)
       }
       hoveredNode = node
       if (hoveredNode) {
         setNodeState(hoveredNode, 'hover')
-        if (edgesGroup) highlightEdgesForNode(edgesGroup, hoveredNode.userData.id, true)
+        if (edgesGroup) highlightEdgesForNode(edgesGroup, hoveredNode.userData.id, true, performance.now() * 0.001)
         renderer.domElement.style.cursor = 'pointer'
       } else {
         renderer.domElement.style.cursor = 'grab'
