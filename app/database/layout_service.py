@@ -69,6 +69,8 @@ def get_layout_subset(
     bbox: Optional[Tuple[float, float, float, float]] = None,
     limit: int = 500,
     offset: int = 0,
+    category: Optional[int] = None,
+    dynasty: Optional[str] = None,
 ) -> Dict:
     """取布局子集。
 
@@ -77,13 +79,17 @@ def get_layout_subset(
         bbox: (xmin, ymin, xmax, ymax)，None 表示全量
         limit: 返回上限
         offset: 跳过
+        category: 0=氏族 / 1=妻妾 / 2=其他 / 3=官吏（M6 筛选）
+        dynasty: 朝代子串（M6 筛选，jiapu 源用 biography/name 子串匹配）
 
     Returns:
         {
-            "nodes": [{"uri": "...", "x": 1.2, "y": 3.4}, ...],
-            "links": [{"source": "uri1", "target": "uri2"}, ...],
-            "total_in_bbox": int,
+            "nodes": [{"uri": "...", "name": "...", "x": 1.2, "y": 3.4,
+                       "category": 0, "biography": "..."}, ...],
+            "links": [...],
+            "total_in_bbox": int,  # bbox 内 + category/dynasty 匹配
             "total_returned": int,
+            "filters": {"category": ..., "dynasty": ...},
         }
     """
     layout = get_layout(source)
@@ -93,33 +99,73 @@ def get_layout_subset(
     edge_src: np.ndarray = layout["edge_src"]
     edge_dst: np.ndarray = layout["edge_dst"]
 
-    # 1. 按 bbox 过滤
+    # 1. 一次性加载人物元数据（person_type + biography 摘要）用于 category/dynasty 过滤
+    person_meta: Dict[str, Dict] = {}
+    try:
+        from . import jiapu_query
+        # 只在 jiapu 源时尝试（其它源无此 helper）
+        if source_router.is_enabled(source):
+            src_cfg = source_router.assert_enabled(source)
+            import sqlite3
+            conn = sqlite3.connect(str(src_cfg["path"]))
+            conn.row_factory = sqlite3.Row
+            for r in conn.execute("SELECT uri, label_chs, description FROM persons"):
+                from .jiapu_query import _row_to_person
+                p = _row_to_person(r)
+                person_meta[p["uri"]] = {
+                    "name": p.get("name", ""),
+                    "category": p.get("person_type", 2),
+                    "biography": (p.get("biography") or "")[:120],
+                }
+            conn.close()
+    except Exception:
+        # 失败时不阻塞主流程（filter 会失效但返回全量）
+        pass
+
+    # 2. 按 bbox 过滤
     if bbox:
         xmin, ymin, xmax, ymax = bbox
         mask = (x >= xmin) & (x <= xmax) & (y >= ymin) & (y <= ymax)
     else:
         mask = np.ones(len(node_ids), dtype=bool)
 
+    # 3. 按 category/dynasty 过滤（numpy 不友好，逐个判断）
+    if category is not None or dynasty:
+        for i in range(len(node_ids)):
+            if not mask[i]:
+                continue
+            uri = str(node_ids[i])
+            meta = person_meta.get(uri, {})
+            if category is not None and meta.get("category") != category:
+                mask[i] = False
+                continue
+            if dynasty:
+                haystack = meta.get("biography", "") + meta.get("name", "")
+                if dynasty not in haystack:
+                    mask[i] = False
+
     visible_indices = np.where(mask)[0]
     total_in_bbox = int(len(visible_indices))
 
-    # 2. 按 offset/limit 切片
+    # 4. 按 offset/limit 切片
     slice_indices = visible_indices[offset:offset + limit]
 
-    # 3. 构建节点
-    nodes = [
-        {
-            "uri": str(node_ids[i]),
+    # 5. 构建节点（含 name/category/biography 给前端用）
+    nodes = []
+    for i in slice_indices:
+        uri = str(node_ids[i])
+        meta = person_meta.get(uri, {})
+        nodes.append({
+            "uri": uri,
             "x": float(x[i]),
             "y": float(y[i]),
             "z": float(layout["z"][i]),
-        }
-        for i in slice_indices
-    ]
+            "name": meta.get("name") or uri.split("/")[-1],
+            "category": meta.get("category", 2),
+            "biography": meta.get("biography", ""),
+        })
 
-    # 4. 构建边（只保留两端都在当前返回的节点中）
-    # 注：必须用 slice_indices 而不是 visible_indices，否则 bbox 大时
-    # links 数量会远超 limit，前端渲染会崩
+    # 6. 构建边（只保留两端都在当前返回的节点中）
     returned_set = set(slice_indices.tolist())
     links = []
     for s, d in zip(edge_src, edge_dst):
@@ -135,6 +181,7 @@ def get_layout_subset(
         "total_in_bbox": total_in_bbox,
         "total_returned": len(nodes),
         "total_visible_for_links": len(links),
+        "filters": {"category": category, "dynasty": dynasty},
     }
 
 

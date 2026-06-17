@@ -27,6 +27,24 @@
         <select v-model="selectedSource" class="nebula-btn" style="background:transparent">
           <option v-for="s in sources" :key="s.id" :value="s.id">{{ s.name }}</option>
         </select>
+        <!-- M6 朝代/家族筛选（M6 筛选 UI） -->
+        <select v-model.number="filterCategory" class="nebula-btn" style="background:transparent" title="按家族分类筛">
+          <option :value="null">全部氏族</option>
+          <option :value="0">姓氏族</option>
+          <option :value="1">妻妾</option>
+          <option :value="3">官吏·文人</option>
+          <option :value="2">其它人物</option>
+        </select>
+        <input
+          v-model="filterDynasty"
+          placeholder="朝代子串..."
+          class="nebula-btn nebula-btn-input"
+          title="按 biography/name 子串筛朝代"
+          @keyup.enter="loadLayout"
+        />
+        <button v-if="filterCategory !== null || filterDynasty" class="nebula-btn nebula-btn-ghost" @click="clearFilters">
+          清除
+        </button>
         <button class="nebula-btn" :disabled="loading" @click="loadLayout">
           {{ loading ? '加载中...' : '刷新星图' }}
         </button>
@@ -60,7 +78,7 @@
     </div>
 
     <!-- 图例 -->
-    <div v-if="layoutNodes.length" class="nebula-legend">
+    <div v-if="layoutNodes.length || totalInBbox" class="nebula-legend">
       <div class="nebula-legend-title">星宿分类</div>
       <div class="nebula-legend-items">
         <div v-for="cat in categoryLegend" :key="cat.id" class="nebula-legend-item">
@@ -72,6 +90,12 @@
         <span>{{ layoutNodes.length }} 颗星</span>
         <span style="margin: 0 8px">·</span>
         <span>{{ layoutEdges.length }} 条连线</span>
+        <template v-if="totalInBbox && (filterCategory !== null || filterDynasty)">
+          <span style="margin: 0 8px">·</span>
+          <span>匹配 {{ totalInBbox }} / {{ totalUnfiltered }} 颗</span>
+          <span style="margin: 0 8px">·</span>
+          <span class="nebula-legend-filter">筛 {{ filterLabel }}</span>
+        </template>
       </div>
     </div>
 
@@ -86,7 +110,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import NebulaCanvas from '../components/nebula/NebulaCanvas.vue'
 import PersonPanel from '../components/person/PersonPanel.vue'
 import { kgAPI } from '../services/api.js'
@@ -105,6 +129,21 @@ const layoutMeta = ref({})
 const error = ref('')
 const selectedNode = ref(null)
 const nebulaRef = ref(null)
+
+// M6 筛选
+const filterCategory = ref(null)
+const filterDynasty = ref('')
+const totalInBbox = ref(0)
+const totalUnfiltered = ref(0)
+
+const filterLabel = computed(() => {
+  const parts = []
+  if (filterCategory.value !== null) {
+    parts.push(CATEGORY_NAMES[filterCategory.value] || `类别 ${filterCategory.value}`)
+  }
+  if (filterDynasty.value) parts.push(`朝代「${filterDynasty.value}」`)
+  return parts.join(' · ')
+})
 
 const categoryLegend = [
   { id: 0, name: CATEGORY_NAMES[0], color: CATEGORY_COLORS[0] },
@@ -144,15 +183,20 @@ async function loadLayout() {
     const meta = await kgAPI.getLayoutMetadata(selectedSource.value)
     layoutMeta.value = meta
 
-    const res = await kgAPI.getLayout(selectedSource.value, null, 500, 0)
+    const filters = {}
+    if (filterCategory.value !== null) filters.category = filterCategory.value
+    if (filterDynasty.value.trim()) filters.dynasty = filterDynasty.value.trim()
+
+    const res = await kgAPI.getLayout(selectedSource.value, null, 500, 0, filters)
     layoutNodes.value = (res.nodes || []).map(n => ({
       id: n.uri || n.id,
-      name: n.label_chs || n.name || n.uri?.split('/').pop() || n.id,
+      name: n.name || n.label_chs || n.uri?.split('/').pop() || n.id,
       x: n.x,
       y: n.y,
       z: n.z,
       dynasty: n.dynasty || '',
       region: n.region || '',
+      biography: n.biography || '',
       category: n.category ?? 2,
     }))
     layoutEdges.value = (res.links || res.edges || []).map(e => ({
@@ -161,6 +205,8 @@ async function loadLayout() {
       type: e.type || 'RELATED',
       confidence: e.confidence ?? 0.7,
     }))
+    totalInBbox.value = res.total_in_bbox || 0
+    totalUnfiltered.value = res.total_in_bbox_unfiltered || layoutMeta.value?.node_count || 0
   } catch (e) {
     console.error('[Nebula] loadLayout error:', e)
     const msg = e.response?.data?.detail || e.message || ''
@@ -169,10 +215,23 @@ async function loadLayout() {
       : `加载失败：${msg || '未知错误'}`
     layoutNodes.value = []
     layoutEdges.value = []
+    totalInBbox.value = 0
   } finally {
     loading.value = false
   }
 }
+
+function clearFilters() {
+  filterCategory.value = null
+  filterDynasty.value = ''
+  loadLayout()
+}
+
+// 筛选条件变化时自动重新加载
+watch([filterCategory, filterDynasty], () => {
+  // 输入框不触发自动 load（避免每按一键都重新查），只对 category dropdown 立即响应
+  if (filterCategory.value !== null) loadLayout()
+})
 
 function onSearchEnter() {
   if (!searchName.value.trim()) return
@@ -230,5 +289,21 @@ onMounted(async () => {
   color: var(--xingye-rice-dim);
   letter-spacing: 0.15em;
   font-family: var(--xingye-font-display);
+}
+
+.nebula-legend-filter {
+  color: var(--xingye-vermilion-main);
+  letter-spacing: 0.1em;
+}
+
+.nebula-btn-input {
+  width: 130px;
+  padding: 4px 8px;
+}
+
+.nebula-btn-ghost {
+  background: transparent;
+  border: 1px solid var(--xingye-vermilion-seal);
+  color: var(--xingye-vermilion-bright);
 }
 </style>

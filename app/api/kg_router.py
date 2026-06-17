@@ -407,6 +407,8 @@ async def kg_layout(
     bbox: str = None,  # "xmin,ymin,xmax,ymax"
     limit: int = 500,
     offset: int = 0,
+    category: int = None,
+    dynasty: str = None,
 ):
     """取预布局坐标子集（M6 前端星云图谱用）。
 
@@ -415,9 +417,11 @@ async def kg_layout(
         bbox: 视锥 bbox "xmin,ymin,xmax,ymax"（可选）
         limit: 返回节点上限
         offset: 跳过
+        category: 0/1/2/3（M6 筛选）
+        dynasty: 朝代子串（M6 筛选）
 
     Returns:
-        {nodes, links, total_in_bbox, total_returned, ...}
+        {nodes, links, total_in_bbox, total_returned, filters, ...}
     """
     try:
         from ..database import layout_service
@@ -432,6 +436,8 @@ async def kg_layout(
             bbox=bbox_tuple,
             limit=limit,
             offset=offset,
+            category=category,
+            dynasty=dynasty,
         )
         return {"status": "success", **result}
     except FileNotFoundError as e:
