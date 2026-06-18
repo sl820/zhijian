@@ -88,28 +88,26 @@ let _lastCullTarget = new THREE.Vector3(NaN, NaN, NaN)
 const CULL_DIST_THRESHOLD = 0.5
 
 // LOD 配置（基于相机距离）
-const LOD_FAR = 38    // > 38: 只 cluster blob
-const LOD_MID = 18    // 18-38: 混合
-// < 18: 纯个体
+// 2026-06-18 v5：原 LOD_FAR=38 太激进，远景只画 cluster blob → 用户看不见图谱。
+// fly mode 需求 = 始终能看到节点。新阈值：只在极远（>60）才退化 cluster，近景全部个体。
+const LOD_FAR = 60    // > 60: 退化到 cluster blob（远景）
+const LOD_MID = 35    // 35-60: 混合淡出
+// < 35: 纯个体
 
 // 视距 LOD（基于 controls.target 距离 · per-node 0/1/2）
-//   0 = near (<18)：满显 + 名字
-//   1 = far  (18-45)：暗 0.3 + 无名字
-//   2 = culled (>45)：不可见，不参与 raycast
-//   边过滤：两端 nodeLod < 2 才渲染
-const NODE_LOD_NEAR = 18
-const NODE_LOD_FAR = 45
+//   0 = near (<25)：满显 + 名字
+//   1 = far  (25-70)：暗 0.35 + 无名字
+//   2 = culled (>70)：不可见，不参与 raycast
+const NODE_LOD_NEAR = 25
+const NODE_LOD_FAR = 70
 const NODE_LOD_NEAR_SQ = NODE_LOD_NEAR * NODE_LOD_NEAR
 const NODE_LOD_FAR_SQ = NODE_LOD_FAR * NODE_LOD_FAR
 const _visibleNodeIds = new Set()  // 视距内（nodeLod < 2）节点 ID
 
-// ============================================================
 // 密度阈值（5000 节点时限制远景可视个体数）
-// DENSITY_THRESHOLD: 触发密度裁剪的节点数阈值
-// DENSITY_FAR_PCT: 远景时保留的节点百分比（剩余由 LOD 0 接管）
-// ============================================================
-const DENSITY_THRESHOLD = 1500
-const DENSITY_FAR_PCT = 0.04   // 5000 × 0.04 = 200（远景最多 200 颗个体，配合 cluster 显示）
+// 2026-06-18 v5：放宽到 3000（原来 1500 太严），远景保留 8%（400 颗，够看清密度）
+const DENSITY_THRESHOLD = 3000
+const DENSITY_FAR_PCT = 0.08
 
 // ============================================================
 // 世界尺度（3D 视差的关键 — z 必须有足够范围才能看出深度）
@@ -242,10 +240,11 @@ function initThree() {
 
   // ============================================================
   // 相机（北宋方志博物：非正面，斜角看进去有真 3D 视差）
+  // 2026-06-18 v5：fly mode 默认 view — 站远一点看整个图谱，方便用户飞向感兴趣节点
+  //   世界坐标 layout 范围 ≈ ±8（normalize 后），相机距离 28 ≈ 视角 30° 看到全部
   // ============================================================
   camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 500)
-  // ★ 默认距离拉远（60 而非 30）— 让 5000 节点先以 cluster 形态呈现
-  camera.position.set(40, 30, 50)
+  camera.position.set(14, 10, 22)  // 距离 √(14²+10²+22²) ≈ 28
   camera.lookAt(0, 0, 0)
 
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' })
@@ -259,8 +258,8 @@ function initThree() {
   container.appendChild(renderer.domElement)
 
   controls = new SimpleOrbitControls(camera, renderer.domElement)
-  controls.minDistance = 6
-  controls.maxDistance = 120
+  controls.minDistance = 3
+  controls.maxDistance = 90
   controls.rotateSpeed = 0.5
   controls.zoomSpeed = 0.9
 
