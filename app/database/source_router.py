@@ -28,7 +28,8 @@ def _env_path(name: str, default: Path) -> Path:
 
 SOURCES: Dict[str, Dict] = {
     "jiapu": {
-        # 上海图书馆 2016 年家谱元数据，2,029,035 persons
+        # 上海图书馆 2016 年家谱元数据，~1.68M persons / 13K relations
+        # 顶层路径（2026-06-18 清理 data/jiapu/ 子目录后主库位置）
         "path": _env_path(
             "ZHIJIAN_SOURCE_JIAPU",
             Path("D:/上海图书馆开放数据/data/shlib_jiapu.db"),

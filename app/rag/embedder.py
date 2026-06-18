@@ -127,7 +127,7 @@ class Embedder:
 
             try:
                 logger.info(f"Trying to load embedder model: {model_name}...")
-                self.model = SentenceTransformer(model_name, device=self.device)
+                self.model = SentenceTransformer(model_name, device=self.device, local_files_only=True)
                 self.model_name = model_name
                 self._loaded = True
                 logger.info(f"Successfully loaded embedder model: {model_name}")

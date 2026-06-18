@@ -4,6 +4,7 @@
 """
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,6 +15,12 @@ from app.api import register_routes, trigger_warmup, get_warmup_state
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# 离线模式：模型已缓存在 ~/.cache/huggingface/，避免运行时去 HF 校验
+# 阻塞 uvicorn worker。setdefault 不覆盖外部显式设置。
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
 
 
 @asynccontextmanager
