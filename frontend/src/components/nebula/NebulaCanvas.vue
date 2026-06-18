@@ -25,6 +25,16 @@
         {{ tooltipText.dynasty }}
       </div>
     </div>
+    <div v-if="flyModeUi.visible" class="fly-mode-hud">
+      <div class="fly-mode-row fly-mode-title">
+        <span class="fly-mode-badge">FLY</span>
+        <span>WASD 移动 · 鼠标转向 · Shift 加速 · Tab 退出</span>
+      </div>
+      <div v-if="flyModeUi.hit" class="fly-mode-row fly-mode-hit">
+        前方 <strong>{{ flyModeUi.hit.distance.toFixed(1) }}</strong> 米
+        <span v-if="flyModeUi.hit.nodeName">· {{ flyModeUi.hit.nodeName }}</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -58,6 +68,9 @@ const wrapperRef = ref(null)
 const containerRef = ref(null)
 
 const store = useNebulaStore()
+
+// fly mode HUD（reactive，每帧从 controls 读 hit info）
+const flyModeUi = ref({ visible: false, hit: null })
 
 // ============================================================
 // Tooltip
@@ -262,6 +275,10 @@ function initThree() {
   controls.maxDistance = 90
   controls.rotateSpeed = 0.5
   controls.zoomSpeed = 0.9
+  controls._onFlyModeChange = (enabled) => {
+    flyModeUi.value.visible = enabled
+    if (!enabled) flyModeUi.value.hit = null
+  }
 
   // ============================================================
   // 星空 / 纸纹点（远景背景）
@@ -310,6 +327,48 @@ function initThree() {
       else store.clearHover()
     },
     onBackgroundPick: () => store.clearSelected(),
+  })
+
+  // ===== fly mode 碰撞 provider（限制最大前进距离）=====
+  //  算法：ray-sphere intersect，对 registry 中每个节点的 bounding sphere
+  //        计算"进入点沿 forward 的距离 t"。
+  //  返回最小 t（如 t > maxDist 表示 maxDist 内无阻挡）。
+  //  性能：5000 节点 × 每帧 60fps ≈ 300k sphere 检测；typed array 顺序访问可接受。
+  //  简化：只看"是否被节点球挡住" → dist to ray < sphereR
+  const _colOrigin = new THREE.Vector3()
+  const _colForward = new THREE.Vector3()
+  const _colToCenter = new THREE.Vector3()
+  controls.setCollisionProvider((camPos, forward, maxDist) => {
+    _colOrigin.copy(camPos)
+    _colForward.copy(forward)
+    const cache = registry.cullCache
+    const n = registry.size
+    let bestT = Infinity
+    let bestName = null
+    let bestId = null
+    for (let i = 0; i < n; i++) {
+      const r = cache.sphereR[i]
+      if (r <= 0) continue
+      _colToCenter.set(cache.sphereCx[i] - _colOrigin.x, cache.sphereCy[i] - _colOrigin.y, cache.sphereCz[i] - _colOrigin.z)
+      // 节点中心在 forward 上的投影距离
+      const proj = _colToCenter.dot(_colForward)
+      if (proj < 0) continue           // 节点在身后
+      if (proj > maxDist + r) continue  // 节点太远（即使撞上也超过 maxDist）
+      // 节点中心到射线的最近距离
+      const dist2Ray2 = _colToCenter.lengthSq() - proj * proj
+      const rPlus = r + 0.3  // 加 0.3 单位缓冲（不要贴脸）
+      if (dist2Ray2 > rPlus * rPlus) continue
+      // 进入点 t = proj - sqrt(rPlus² - dist2Ray2)
+      const t = proj - Math.sqrt(rPlus * rPlus - dist2Ray2)
+      if (t < bestT) {
+        bestT = t
+        const m = cache && registry.getMeshAt?.(i)
+        bestId = m?.userData?.id || m?.userData?.uri
+        bestName = m?.userData?.name || null
+      }
+    }
+    if (bestT === Infinity) return null
+    return { distance: bestT, nodeId: bestId, nodeName: bestName }
   })
 
   resizeObserver = new ResizeObserver(handleResize)
@@ -710,6 +769,13 @@ function renderFrame() {
   }
 
   controls?.update?.(dt)
+
+  // fly mode HUD 刷新（hit 距离每帧变化）
+  if (controls._flyMode) {
+    const hit = controls.getNearestHit?.()
+    flyModeUi.value.hit = hit
+  }
+
   renderer.render(scene, camera)
 }
 
@@ -835,5 +901,52 @@ defineExpose({
   font-size: 11px;
   margin-top: 2px;
   letter-spacing: 0.2em;
+}
+.fly-mode-hud {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  background: rgba(13, 13, 18, 0.85);
+  border: 1px solid var(--xingye-gold-bright, #d4a830);
+  border-radius: 4px;
+  padding: 10px 14px;
+  color: var(--xingye-rice-bright, #f0e6d0);
+  font-family: var(--xingye-font-display, serif);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  z-index: 100;
+  min-width: 220px;
+  box-shadow: 0 0 16px rgba(212, 168, 48, 0.3);
+}
+.fly-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.6;
+}
+.fly-mode-title {
+  color: var(--xingye-rice-dim, #b8a890);
+  border-bottom: 1px solid rgba(212, 168, 48, 0.2);
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+.fly-mode-badge {
+  background: var(--xingye-vermilion-seal, #c2362a);
+  color: #fff;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  letter-spacing: 0.15em;
+  font-weight: 600;
+}
+.fly-mode-hit {
+  color: var(--xingye-gold-bright, #d4a830);
+  font-size: 13px;
+}
+.fly-mode-hit strong {
+  color: var(--xingye-vermilion-seal, #c2362a);
+  font-weight: 600;
+  margin: 0 2px;
 }
 </style>

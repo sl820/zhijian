@@ -293,6 +293,12 @@ export class SimpleOrbitControls {
     this._flyPitch = 0              // 俯仰（相对水平，[-π/2, π/2]）
     this._onFlyModeChange = null    // (enabled) => void 回调（NebulaCanvas 切 UI 提示）
 
+    // ===== 碰撞（fly mode）：限制最大前进距离 =====
+    //   provider(cameraPos, forward, maxDist) → number
+    //   返回"最近阻挡点沿 forward 的距离"，callers 把 speed * k 限制到不超过这个距离
+    this._collisionProvider = null
+    this._lastHitInfo = null        // { distance, nodeId, nodeName } 给 UI 提示
+
     this._updateCameraFromSpherical()
     this._bindEvents()
   }
@@ -304,11 +310,38 @@ export class SimpleOrbitControls {
     if (this._flyMode === enabled) return
     this._flyMode = enabled
     if (enabled) {
-      // 从 spherical 同步 yaw/pitch（让 fly 起始视角 = 当前 orbit 视角）
-      this._flyYaw = this._targetSpherical.theta
-      this._flyPitch = this._targetSpherical.phi - Math.PI / 2
+      // 同步 yaw/pitch：从当前 camera 实际朝向反推（不是从 _spherical，否则
+      //   spherical 初始值 (30, 0, π/2) 与真实 camera.position 不一致会导致
+      //   look direction 偏离 target，用户看不见图谱）
+      const offset = _tmpCamOffset.subVectors(this.camera.position, this.target)
+      const len = offset.length()
+      if (len > 1e-4) {
+        // 当前 look direction = -offset / len（target → position 是反方向）
+        // yaw (绕 y): 水平角，从 +z 顺时针
+        // pitch: 垂直角，向上为正
+        const fx = -offset.x / len
+        const fy = -offset.y / len
+        const fz = -offset.z / len
+        this._flyYaw = Math.atan2(fx, fz)
+        this._flyPitch = Math.asin(Math.max(-1, Math.min(1, fy)))
+      }
     }
     this._onFlyModeChange?.(enabled)
+  }
+
+  /**
+   * 注册碰撞检测 provider（fly mode 限制前进距离）
+   * 形参：provider(cameraPos: THREE.Vector3, forward: THREE.Vector3, maxDist: number) → { distance, nodeId, nodeName } | null
+   */
+  setCollisionProvider(provider) {
+    this._collisionProvider = provider
+  }
+
+  /**
+   * 获取最近阻挡信息（外部 UI 显示"前方 X 米有 Y"）
+   */
+  getNearestHit() {
+    return this._lastHitInfo
   }
 
   _bindEvents() {
@@ -435,7 +468,27 @@ export class SimpleOrbitControls {
 
     const len = Math.hypot(mx, my, mz)
     if (len > 0) {
-      const k = speed / len
+      let k = speed / len
+      // ★ 碰撞检测：只在向前（W）方向限制最大步长
+      //   横向 / 上下移动不限制（用户可以绕开节点）
+      if (this._flyKeys.w && this._collisionProvider) {
+        // 把 desired movement 投影到 forward 上（前进分量 = dot(move_dir, forward)）
+        const fwdComp = (mx * forward.x + my * forward.y + mz * forward.z) / len
+        if (fwdComp > 0) {
+          const desiredForward = speed * fwdComp
+          const hit = this._collisionProvider(this.camera.position, forward, desiredForward)
+          this._lastHitInfo = hit
+          if (hit && hit.distance < desiredForward) {
+            // 限制前进分量不超过 (hit.distance - 1.0) 留 1 单位缓冲
+            const maxForward = Math.max(0, hit.distance - 1.0)
+            // 重新分配：原 wanted step 比例 = maxForward / desiredForward
+            const scale = maxForward / desiredForward
+            k *= scale
+          }
+        }
+      } else if (!this._flyKeys.w) {
+        this._lastHitInfo = null
+      }
       this.camera.position.x += mx * k
       this.camera.position.y += my * k
       this.camera.position.z += mz * k
@@ -471,6 +524,7 @@ export class SimpleOrbitControls {
 const _tmpFwd = new THREE.Vector3()
 const _tmpRight = new THREE.Vector3()
 const _tmpUp = new THREE.Vector3()
+const _tmpCamOffset = new THREE.Vector3()
 
 export default {
   bindInteractions,
