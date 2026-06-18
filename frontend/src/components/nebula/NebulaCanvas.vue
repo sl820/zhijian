@@ -1,42 +1,54 @@
 <!--
-  志鉴·星野图考 NebulaCanvas
-  three.js 3D 容器 + 服务端 FA2 预布局坐标 + 视锥裁剪 + 视差星空背景
+  志鉴·星野图考 NebulaCanvas（v4 - 北宋方志博物重构）
 
-  Props:
-    - nodes: [{ id, name, x, y, z, category, dynasty, ... }]
-    - edges: [{ source, target, type, confidence }]
-    - loading: 是否显示加载动画
+  改造（2026-06-18 v4）：
+    - 点击修复（soft-cull）：m.visible=false → m.userData._culled=true，raycast 手动过滤
+    - 5000 节点分簇 LOD：远景 InstancedMesh blob（~50 个），中景混合，近景纯个体
+    - 移除 auto-rotate（用户投诉"内容堆叠"主因）
+    - 移除 UnrealBloomPass（5000 节点 bloom 全糊）
+    - 背景：靛蓝 → 米黄纸；雾：深蓝 → 暗纸
+    - 灯光：金粉/朱砂/米白 → 米白/金粉/淡墨
+    - 配色统一用新 PALETTE token
+    - 朝代 z 维度保留（立体感来源）
+    - 宋代天文图规保留 4 重同心圆 + 二十八宿，移除天枢光晕 + 12 放射线
 -->
 <template>
   <div ref="wrapperRef" class="nebula-canvas-wrapper">
     <div ref="containerRef" class="nebula-canvas-inner"></div>
     <div
-      v-if="hoveredNode"
+      v-if="tooltipVisible"
       class="nebula-tooltip"
       :style="{ left: `${tooltipPos.x}px`, top: `${tooltipPos.y}px` }"
     >
-      <div>{{ hoveredNode.userData.name }}</div>
-      <div v-if="hoveredNode.userData.dynasty" class="nebula-tooltip-dynasty">
-        {{ hoveredNode.userData.dynasty }}
+      <div class="nebula-tooltip-name">{{ tooltipText.name }}</div>
+      <div v-if="tooltipText.dynasty" class="nebula-tooltip-dynasty">
+        {{ tooltipText.dynasty }}
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import * as THREE from 'three'
 import { PALETTE } from '../../constants/palette.js'
-import { createPersonNode, setNodeState, createNameLabel } from './PersonNode.js'
-import { createRelationEdges, highlightEdgesForNode, setLineMaterialsResolution, tickEdgeHighlight, disposeLineMaterials } from './RelationEdge.js'
-import { createStarField, createCelestialMapPlane } from './StarFieldBackground.js'
+import { createPersonNode, createNameLabel, setNodeState } from './PersonNode.js'
+import { createRelationEdges, highlightEdgesForNode, setLineMaterialsResolution, tickEdgeHighlight, disposeLineMaterials, filterEdgesByLOD } from './RelationEdge.js'
+import { createStarField } from './StarFieldBackground.js'
+import { createCoordinateRings } from './CoordinateRings.js'
+import {
+  clusterNodes, createClusterMesh, createClusterHaloMesh,
+  computeLOD, disposeClusterMesh,
+} from './ClusterRenderer.js'
 import { bindInteractions, SimpleOrbitControls, flyToNode } from './interaction.js'
+import { NodeRegistry } from './NodeRegistry.js'
+import { useNebulaStore } from '../../stores/nebula.js'
+import { installNebulaMiddleware } from '../../stores/nebulaMiddleware.js'
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
   edges: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
-  // M6 时间轴：当前激活的朝代 id 集合；null/undefined = 全部激活
   activeDynasties: { type: [Set, Array, null], default: null },
 })
 
@@ -44,78 +56,149 @@ const emit = defineEmits(['node-click', 'background-click'])
 
 const wrapperRef = ref(null)
 const containerRef = ref(null)
-const hoveredNode = ref(null)
+
+const store = useNebulaStore()
+
+// ============================================================
+// Tooltip
+// ============================================================
+const tooltipVisible = computed(() => !!store.hoveredNodeData)
+const tooltipText = computed(() => ({
+  name: store.hoveredNodeData?.name || store.hoveredNodeData?.id?.split('/').pop() || '?',
+  dynasty: store.hoveredNodeData?.dynasty || '',
+}))
 const tooltipPos = ref({ x: 0, y: 0 })
+const _tooltipVec = new THREE.Vector3()
 
 let scene, camera, renderer, controls, animationId
-let nodesGroup, edgesGroup, starField, celestialMap
+let nodesGroup, edgesGroup, starField, coordRings
+let clusterGroup  // ★ 新增：5000 节点的聚合 blob（InstancedMesh）
+let clusterHaloGroup
 let interactions
 const nodePositions = new Map()
+const registry = new NodeRegistry()
 let resizeObserver
+let uninstallMiddleware = null
 
-// ============================================================
-// M6 性能优化：视锥裁剪 + zoom-level 密度过滤
-// ============================================================
-// 视锥对象（每帧从相机投影矩阵构建）
 const _frustum = new THREE.Frustum()
 const _projMatrix = new THREE.Matrix4()
 
-// 相机距离变化检测：只在显著移动时才重算（避免每帧扫描所有节点）
 let _lastCullCamPos = new THREE.Vector3(NaN, NaN, NaN)
 let _lastCullTarget = new THREE.Vector3(NaN, NaN, NaN)
-const CULL_DIST_THRESHOLD = 0.5  // 相机移动超过 0.5 单位才重算
+const CULL_DIST_THRESHOLD = 0.5
 
-// 节点 importance rank（节点数 > 阈值时按 degree 排序，仅渲染前 N）
-const DENSITY_THRESHOLD = 800    // < 800 节点全部渲染
-const DENSITY_FAR_PCT = 0.35     // 远距离时只保留 35% 节点（按 importance）
+// LOD 配置（基于相机距离）
+const LOD_FAR = 38    // > 38: 只 cluster blob
+const LOD_MID = 18    // 18-38: 混合
+// < 18: 纯个体
 
-// 坐标归一化参数（FA2 输出通常在 [-1, 1]，需映射到合理的世界坐标）
-const WORLD_SCALE = 18
+// 视距 LOD（基于 controls.target 距离 · per-node 0/1/2）
+//   0 = near (<18)：满显 + 名字
+//   1 = far  (18-45)：暗 0.3 + 无名字
+//   2 = culled (>45)：不可见，不参与 raycast
+//   边过滤：两端 nodeLod < 2 才渲染
+const NODE_LOD_NEAR = 18
+const NODE_LOD_FAR = 45
+const NODE_LOD_NEAR_SQ = NODE_LOD_NEAR * NODE_LOD_NEAR
+const NODE_LOD_FAR_SQ = NODE_LOD_FAR * NODE_LOD_FAR
+const _visibleNodeIds = new Set()  // 视距内（nodeLod < 2）节点 ID
 
-// M6 时间轴：按 birth_year 映射到朝代 id
-// 与后端 layout_service 解析的 int year 配套
-const DYNASTY_BUCKETS = [
-  { id: 'pre_han',   label: '汉前/汉',  start: -9999, end: 220  },
-  { id: 'three_jin', label: '三国/晋',  start: 220,  end: 420  },
-  { id: 'north_sou', label: '南北朝',    start: 420,  end: 589  },
-  { id: 'sui',       label: '隋',        start: 589,  end: 618  },
-  { id: 'tang',      label: '唐',        start: 618,  end: 907  },
-  { id: 'five_dyn',  label: '五代',      start: 907,  end: 960  },
-  { id: 'song',      label: '宋',        start: 960,  end: 1279 },
-  { id: 'yuan',      label: '元',        start: 1279, end: 1368 },
-  { id: 'ming',      label: '明',        start: 1368, end: 1644 },
-  { id: 'qing',      label: '清',        start: 1644, end: 1912 },
-  { id: 'modern',    label: '民国+',     start: 1912, end: 9999 },
-]
+// ============================================================
+// 密度阈值（5000 节点时限制远景可视个体数）
+// DENSITY_THRESHOLD: 触发密度裁剪的节点数阈值
+// DENSITY_FAR_PCT: 远景时保留的节点百分比（剩余由 LOD 0 接管）
+// ============================================================
+const DENSITY_THRESHOLD = 1500
+const DENSITY_FAR_PCT = 0.04   // 5000 × 0.04 = 200（远景最多 200 颗个体，配合 cluster 显示）
+
+// ============================================================
+// 世界尺度（3D 视差的关键 — z 必须有足够范围才能看出深度）
+// ============================================================
+const WORLD_SCALE_XY = 16   // FA2 x,y → celestial plane
+const WORLD_SCALE_Z = 9     // 朝代层间距（每朝代 2-3 个单位）
+const Z_LAYER_RANGE = 4     // 每层内部 jitter
+
+// ============================================================
+// 朝代 z 深度映射（宋 = 0 中间层；越早越负，越晚越正）
+// ============================================================
+const DYNASTY_Z_LAYER = {
+  pre_han: -3.0,   // 汉前/汉
+  three_jin: -2.2, // 三国/晋
+  north_sou: -1.5, // 南北朝
+  sui: -1.0,       // 隋
+  tang: -0.6,      // 唐
+  five_dyn: -0.3,  // 五代
+  song: 0.0,       // 宋（中层）
+  yuan: 0.6,       // 元
+  ming: 1.4,       // 明
+  qing: 2.4,       // 清
+  modern: 3.0,     // 民国+
+}
+
+let _frameCounter = 0
+let _lastCullVersion = -1
+let _lastLabelBucket = -1
+let _lastLabelVersion = -1
+let _lastFrameCamPos = new THREE.Vector3(NaN, NaN, NaN)
+let _lastFrameTarget = new THREE.Vector3(NaN, NaN, NaN)
+
+const DIST_BUCKETS = [12, 30, 60, Infinity]
+function computeDistBucket(d) {
+  if (d < DIST_BUCKETS[0]) return 0
+  if (d < DIST_BUCKETS[1]) return 1
+  if (d < DIST_BUCKETS[2]) return 2
+  return 3
+}
+
+const DIM_FRAME_INTERVAL = 2
+const _sphere = new THREE.Sphere()
+let _lastActiveSetRef = null
+
+// ============================================================
+// 朝代 → bucket 映射
+// ============================================================
 function yearToDynasty(year) {
   if (year == null || isNaN(year)) return null
   const y = Number(year)
-  for (const b of DYNASTY_BUCKETS) {
-    if (y >= b.start && y < b.end) return b.id
-  }
-  return null
+  if (y < 220) return 'pre_han'
+  if (y < 420) return 'three_jin'
+  if (y < 589) return 'north_sou'
+  if (y < 618) return 'sui'
+  if (y < 907) return 'tang'
+  if (y < 960) return 'five_dyn'
+  if (y < 1279) return 'song'
+  if (y < 1368) return 'yuan'
+  if (y < 1644) return 'ming'
+  if (y < 1912) return 'qing'
+  return 'modern'
 }
 
+/**
+ * 3D 深度投影（宋代天文图式）：
+ *   FA2 x, y → celestial plane (X, Y)
+ *   birth_year → z 深度层（朝代分层）+ jitter
+ */
 function normalizeCoords(nodes) {
   if (!nodes.length) return nodes
-  let minX = Infinity, minY = Infinity, minZ = Infinity
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
   for (const n of nodes) {
-    const x = n.x ?? 0, y = n.y ?? 0, z = n.z ?? 0
+    const x = n.x ?? 0, y = n.y ?? 0
     if (x < minX) minX = x; if (x > maxX) maxX = x
     if (y < minY) minY = y; if (y > maxY) maxY = y
-    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
   }
   const cx = (minX + maxX) / 2
   const cy = (minY + maxY) / 2
-  const cz = (minZ + maxZ) / 2
-  const range = Math.max(maxX - minX, maxY - minY, maxZ - minZ) || 1
+  const range = Math.max(maxX - minX, maxY - minY) || 1
 
   for (const n of nodes) {
-    n._wx = ((n.x ?? 0) - cx) / range * WORLD_SCALE
-    n._wy = ((n.y ?? 0) - cy) / range * WORLD_SCALE
-    n._wz = ((n.z ?? 0) - cz) / range * WORLD_SCALE * 0.4  // z 压扁，避免立体感过头
-    n._dynasty = yearToDynasty(n.birth_year)
+    n._wx = ((n.x ?? 0) - cx) / range * WORLD_SCALE_XY
+    n._wy = ((n.y ?? 0) - cy) / range * WORLD_SCALE_XY
+
+    const dy = yearToDynasty(n.birth_year)
+    const layerZ = DYNASTY_Z_LAYER[dy] ?? 0
+    // 每层内部 jitter（z 维度 ± Z_LAYER_RANGE）
+    n._wz = layerZ * WORLD_SCALE_Z + (Math.random() - 0.5) * Z_LAYER_RANGE
+    n._dynasty = dy
   }
   return nodes
 }
@@ -125,37 +208,74 @@ function initThree() {
   const width = container.clientWidth
   const height = container.clientHeight
 
-  // Scene
   scene = new THREE.Scene()
+  // ★ 靛蓝夜底（星野图考 · 苏州石刻天文图式）
   scene.background = new THREE.Color(PALETTE.indigo.deep)
-  scene.fog = new THREE.FogExp2(PALETTE.indigo.deep, 0.018)
+  // 雾用中层靛蓝，密度调低（之前 0.018 把颜色洗成白色）
+  scene.fog = new THREE.FogExp2(PALETTE.indigo.mid, 0.008)
 
-  // Camera
+  // ============================================================
+  // 三点光照（靛蓝夜底 · 冷月光 + 金粉边光）
+  // ============================================================
+  // 环境光：冷月白，给整体氛围
+  scene.add(new THREE.AmbientLight(0xd8e0f0, 0.55))
+
+  // 主光：冷月白，从右上斜射（key light）
+  const keyLight = new THREE.DirectionalLight(0xe8eef8, 0.9)
+  keyLight.position.set(20, 25, 15)
+  scene.add(keyLight)
+
+  // 边光：金粉，从背后射入（rim light — 给节点金边）
+  const rimLight = new THREE.DirectionalLight(0xd4a830, 0.55)
+  rimLight.position.set(-15, -8, -20)
+  scene.add(rimLight)
+
+  // 填充光：靛蓝冷色，从左侧补光
+  const fillLight = new THREE.DirectionalLight(0x8090a8, 0.4)
+  fillLight.position.set(-15, 10, 8)
+  scene.add(fillLight)
+
+  // 中心点光（冷月白，给场景中心加氛围）
+  const centerLight = new THREE.PointLight(0xe0e8f8, 0.4, 35, 1.5)
+  centerLight.position.set(0, 0, 0)
+  scene.add(centerLight)
+
+  // ============================================================
+  // 相机（北宋方志博物：非正面，斜角看进去有真 3D 视差）
+  // ============================================================
   camera = new THREE.PerspectiveCamera(55, width / height, 0.1, 500)
-  camera.position.set(0, 8, 30)
+  // ★ 默认距离拉远（60 而非 30）— 让 5000 节点先以 cluster 形态呈现
+  camera.position.set(40, 30, 50)
+  camera.lookAt(0, 0, 0)
 
-  // Renderer
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.setSize(width, height)
   renderer.domElement.style.cursor = 'grab'
+  // 真实光照需要 tone mapping
+  renderer.toneMapping = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.0
+  renderer.outputColorSpace = THREE.SRGBColorSpace
   container.appendChild(renderer.domElement)
 
-  // Controls
   controls = new SimpleOrbitControls(camera, renderer.domElement)
-  controls.minDistance = 4
-  controls.maxDistance = 80
+  controls.minDistance = 6
+  controls.maxDistance = 120
+  controls.rotateSpeed = 0.5
+  controls.zoomSpeed = 0.9
 
-  // Star field background
+  // ============================================================
+  // 星空 / 纸纹点（远景背景）
+  // ============================================================
   starField = createStarField(4000)
   scene.add(starField)
 
-  // Celestial map plane
-  celestialMap = createCelestialMapPlane(220)
-  celestialMap.position.z = -80
-  scene.add(celestialMap)
+  // ============================================================
+  // 宋代天文图规（4 重同心圆 + 二十八宿）
+  // ============================================================
+  coordRings = createCoordinateRings({ radius: 22, innerRadius: 3 })
+  scene.add(coordRings)
 
-  // Groups for nodes / edges
   nodesGroup = new THREE.Group()
   nodesGroup.userData.type = 'nodes'
   scene.add(nodesGroup)
@@ -164,32 +284,35 @@ function initThree() {
   edgesGroup.userData.type = 'edges'
   scene.add(edgesGroup)
 
-  // Interactions
+  // ============================================================
+  // ★ 聚合 blob 组（InstancedMesh，5000 节点 → ~50 个 blob）
+  // ============================================================
+  clusterGroup = new THREE.Group()
+  clusterGroup.userData.type = 'cluster-blob'
+  scene.add(clusterGroup)
+
+  clusterHaloGroup = new THREE.Group()
+  clusterHaloGroup.userData.type = 'cluster-halo'
+  scene.add(clusterHaloGroup)
+
+  // 移除：后处理 EffectComposer / UnrealBloomPass / OutputPass
+  // 原因：5000 节点 bloom 全糊，米黄纸底不需 bloom 装饰
+
+  // ============================================================
+  // 交互绑定
+  // ============================================================
   interactions = bindInteractions({
     scene, camera, renderer, controls,
-    nodesGroup, edgesGroup,
-    onNodeHover: (node) => {
-      hoveredNode.value = node
-      if (node) updateTooltipPosition(node)
+    registry,
+    store,
+    onPick: (id, data) => store.setSelected(id, data),
+    onHover: (id, data) => {
+      if (id) store.setHover(id, data)
+      else store.clearHover()
     },
-    onNodeClick: (node) => emit('node-click', node.userData),
-    onBackgroundClick: () => emit('background-click'),
+    onBackgroundPick: () => store.clearSelected(),
   })
 
-  // Tooltip position via raycaster (rel-pos to wrapper, computed each frame in animate())
-  function updateTooltipPosition(node) {
-    if (!wrapperRef.value) return
-    const v = _tooltipVec
-    v.setFromMatrixPosition(node.matrixWorld)
-    v.project(camera)
-    const wrapperRect = wrapperRef.value.getBoundingClientRect()
-    const x = (v.x * 0.5 + 0.5) * wrapperRect.width
-    const y = (-v.y * 0.5 + 0.5) * wrapperRect.height
-    tooltipPos.value = { x, y }
-  }
-  const _tooltipVec = new THREE.Vector3()
-
-  // Resize
   resizeObserver = new ResizeObserver(handleResize)
   resizeObserver.observe(container)
 }
@@ -201,19 +324,19 @@ function handleResize() {
   camera.aspect = w / h
   camera.updateProjectionMatrix()
   renderer.setSize(w, h)
-  // M6 飞白：Line2 粗线在屏幕空间宽度依赖 resolution，必须同步
   setLineMaterialsResolution(w, h)
 }
 
 function buildScene() {
   if (!scene) return
-  // Clear
+
+  // 清空 nodesGroup / edgesGroup
   while (nodesGroup.children.length) {
     const c = nodesGroup.children.pop()
     c.traverse((obj) => {
       if (obj.geometry) obj.geometry.dispose()
       if (obj.material) {
-        if (obj.material.map) obj.material.map.dispose?.()
+        if (obj.material.map) obj.material.map?.dispose?.()
         obj.material.dispose?.()
       }
     })
@@ -223,263 +346,408 @@ function buildScene() {
     c.geometry?.dispose?.()
     c.material?.dispose?.()
   }
-  nodePositions.clear()
+  // ★ 清空 clusterGroup / clusterHaloGroup
+  while (clusterGroup.children.length) {
+    const m = clusterGroup.children.pop()
+    disposeClusterMesh(m)
+  }
+  while (clusterHaloGroup.children.length) {
+    const m = clusterHaloGroup.children.pop()
+    disposeClusterMesh(m)
+  }
 
-  if (!props.nodes.length) return
+  nodePositions.clear()
+  registry.clear()
+
+  if (!props.nodes.length) {
+    store.bumpLayout([])
+    return
+  }
 
   const normalized = normalizeCoords([...props.nodes])
+
+  // 从 edges 计算每个节点的 degree（决定 3D 球体半径）
+  const degreeMap = new Map()
+  for (const e of props.edges) {
+    degreeMap.set(e.source, (degreeMap.get(e.source) || 0) + 1)
+    degreeMap.set(e.target, (degreeMap.get(e.target) || 0) + 1)
+  }
+  for (const node of normalized) {
+    node.degree = degreeMap.get(node.id) || 0
+  }
+
+  // ★ 创建聚合 blob（5000 节点 → ~50 个 InstancedMesh 球）
+  const clusters = clusterNodes(normalized)
+  if (clusters.length) {
+    const blobMesh = createClusterMesh(clusters)
+    clusterGroup.add(blobMesh)
+    const haloMesh = createClusterHaloMesh(clusters)
+    clusterHaloGroup.add(haloMesh)
+  }
 
   for (const node of normalized) {
     const group = createPersonNode(node)
     group.position.set(node._wx, node._wy, node._wz)
-    // M6 时间轴：朝代淡化乘子（每帧 lerp 到 _dynMulTarget）
     group.userData._dynMul = 1.0
     group.userData._dynMulTarget = 1.0
+    group.userData.state = 'idle'
+    group.userData._culled = true  // 初始：被 cull（远景只看 blob）
+
     nodesGroup.add(group)
+    registry.add(node.id, group)
     nodePositions.set(node.id, group.position)
   }
 
-  // Edges
   const edgesObj = createRelationEdges(props.edges, nodePositions)
-  // 把 edgesGroup 替换为新 group 的内容（保留原 group 给交互引用）
   for (const child of edgesObj.children) {
     edgesGroup.add(child)
   }
 
-  // M6: 计算节点 importance 排名 + 包围球（视锥裁剪用）
   buildImportanceAndSpheres()
 
-  // 重置 cull 状态，强制下一帧重算
   _lastCullCamPos.set(NaN, NaN, NaN)
   _lastCullTarget.set(NaN, NaN, NaN)
+
+  store.bumpLayout(normalized.map((n) => n.id))
+
+  if (import.meta.env?.DEV) {
+    const check = registry.integrityCheck(scene)
+    if (!check.ok) console.warn('[NodeRegistry] integrity check failed:', check.orphans)
+  }
 }
 
-/**
- * M6 性能优化：
- * - importance: 节点 degree（被多少条边连接）
- * - _rank: 排序后位置（0 = 最重要）
- * - _sphere: 节点包围球（视锥裁剪用，避免每帧 allocate）
- */
 function buildImportanceAndSpheres() {
   const degree = new Map()
   for (const e of props.edges) {
     degree.set(e.source, (degree.get(e.source) || 0) + 1)
     degree.set(e.target, (degree.get(e.target) || 0) + 1)
   }
-  // 也算 self-loop（节点的"重要度"至少 = 边数）
-  for (const child of nodesGroup.children) {
-    if (child.userData?.type !== 'person') continue
-    const id = child.userData.id || child.userData.uri
-    if (!degree.has(id)) degree.set(id, 0)
+  registry.forEach((m) => {
+    if (m.userData?.type !== 'person') return
+    const id = m.userData.id || m.userData.uri
+    if (id && !degree.has(id)) degree.set(id, 0)
+  })
+  const rankList = []
+  registry.forEach((m, i) => {
+    if (m.userData?.type !== 'person') return
+    const id = m.userData.id || m.userData.uri
+    rankList.push([i, degree.get(id) || 0])
+  })
+  rankList.sort((a, b) => b[1] - a[1])
+  for (let i = 0; i < rankList.length; i++) {
+    const [idx] = rankList[i]
+    const m = registry.getMeshAt(idx)
+    if (!m) continue
+    registry.setRank(idx, i)
+    const cat = m.category ?? m.userData?.category ?? 2
+    // bounding sphere 半径用节点的几何半径（不是固定 1.2/0.7）
+    const geom = m.children?.[0]?.geometry
+    const r = geom?.parameters?.radius ?? (cat === 0 ? 0.5 : 0.3)
+    registry.setSphere(idx, m.position.x, m.position.y, m.position.z, r)
   }
-  // 排序（按 degree 降序）
-  const sorted = [...nodesGroup.children].sort((a, b) => {
-    const ai = degree.get(a.userData.id || a.userData.uri) || 0
-    const bi = degree.get(b.userData.id || b.userData.uri) || 0
-    return bi - ai
-  })
-  // 写 rank + sphere
-  sorted.forEach((n, i) => {
-    n.userData._rank = i
-    const cat = n.userData.category ?? 2
-    const r = cat === 0 ? 1.2 : 0.7  // category 0（氏族）大节点，半径更大
-    n.userData._sphere = new THREE.Sphere(n.position.clone(), r)
-  })
 }
 
-/**
- * M6 视锥裁剪 + zoom-level 密度过滤。
- *
- * 算法：
- * 1. 节点数 < DENSITY_THRESHOLD (800) → 全部候选
- * 2. 否则按相机距离插值：近 = 100%、远 = 35%
- * 3. 候选节点再做视锥裁剪：不在视锥内的 visible=false
- *
- * 性能：仅当相机移动 > CULL_DIST_THRESHOLD 时重算（其它帧沿用上次的可见性）
- */
-function applyCulling() {
-  if (!nodesGroup || !nodesGroup.children.length) return
-  if (!camera || !controls) return
+function updateCulling(camDist, distBucket, camMoved) {
+  if (!camMoved && !registry.isDirty() && registry.version === _lastCullVersion) return
+  _lastCullVersion = registry.version
+  registry.clearDirty()
 
-  const camPos = camera.position
-  const target = controls.target || new THREE.Vector3()
-  // 仅当相机显著移动时才重算
-  if (
-    camPos.distanceTo(_lastCullCamPos) < CULL_DIST_THRESHOLD &&
-    target.distanceTo(_lastCullTarget) < CULL_DIST_THRESHOLD
-  ) {
-    return  // 沿用上次的 visible 状态
-  }
-  _lastCullCamPos.copy(camPos)
-  _lastCullTarget.copy(target)
+  if (registry.size === 0 || !camera || !controls) return
 
-  // 1. 密度过滤：按相机距离决定保留多少节点
-  const total = nodesGroup.children.length
+  const total = registry.size
   let visibleCount = total
   if (total > DENSITY_THRESHOLD) {
-    const camDist = camPos.distanceTo(target)
-    // camDist ∈ [4, 80] → t ∈ [0, 1]
     const t = Math.max(0, Math.min(1, (camDist - 4) / 50))
-    // 远 = DENSITY_FAR_PCT，近 = 100%
     const pct = 1 - t * (1 - DENSITY_FAR_PCT)
     visibleCount = Math.max(100, Math.floor(total * pct))
   }
 
-  // 2. 视锥裁剪
   _projMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
   _frustum.setFromProjectionMatrix(_projMatrix)
 
-  for (const n of nodesGroup.children) {
-    if (n.userData?._rank >= visibleCount) {
-      n.visible = false
-      continue
+  const cache = registry.cullCache
+  const rankArr = cache.rank
+  const sphereR = cache.sphereR
+  const sphereCx = cache.sphereCx
+  const sphereCy = cache.sphereCy
+  const sphereCz = cache.sphereCz
+  const visArr = cache.visible
+  const bucketArr = cache.bucket
+
+  // 视距 LOD：基于 controls.target 距离（pan/flyToNode 都改 target）
+  const tgt = controls.target
+  const tx = tgt.x, ty = tgt.y, tz = tgt.z
+  _visibleNodeIds.clear()
+
+  registry.forEach((m, i) => {
+    let visible
+    if (rankArr[i] >= visibleCount) {
+      visible = 0
+    } else {
+      const r = sphereR[i]
+      if (r <= 0) {
+        visible = 1
+      } else {
+        _sphere.center.set(sphereCx[i], sphereCy[i], sphereCz[i])
+        _sphere.radius = r
+        visible = _frustum.intersectsSphere(_sphere) ? 1 : 0
+      }
     }
-    const sphere = n.userData?._sphere
-    if (!sphere) {
-      n.visible = true
-      continue
+    // ★ soft-cull（点击修复关键）
+    //   旧版用 m.visible = visible === 1，副作用是 Three.js Raycaster 跳过 invisible 节点
+    //   改为 _culled 自定义 flag：mesh 仍 visible=true（render 正常），
+    //   interaction.pickNode 手动过滤 _culled=true 节点。
+    //   性能：5000 个小球的 frustumCulled 由 Three.js 自动处理，无需手动设 visible
+    m.userData._culled = visible !== 1
+    m.userData._culledReason = rankArr[i] >= visibleCount ? 'rank' : 'frustum'
+    visArr[i] = visible
+    bucketArr[i] = distBucket
+
+    // 视距 LOD：per-node 距离 controls.target
+    const dx = sphereCx[i] - tx
+    const dy = sphereCy[i] - ty
+    const dz = sphereCz[i] - tz
+    const d2 = dx*dx + dy*dy + dz*dz
+    let nodeLod
+    if (d2 < NODE_LOD_NEAR_SQ) nodeLod = 0
+    else if (d2 < NODE_LOD_FAR_SQ) nodeLod = 1
+    else nodeLod = 2
+    m.userData._lod = nodeLod
+
+    // 边过滤集：在视距内（nodeLod<2）且未 cull
+    if (visible === 1 && nodeLod < 2) {
+      const id = m.userData.id || m.userData.uri
+      if (id) _visibleNodeIds.add(id)
     }
-    n.visible = _frustum.intersectsSphere(sphere)
-  }
+  })
+
+  // 边按端点可见性过滤（每帧 O(31620)，Set 查找亚毫秒）
+  filterEdgesByLOD(edgesGroup, _visibleNodeIds)
 }
 
-/**
- * M6 时间轴朝代淡化
- * - activeDynasties 为 null/undefined → 全部 1.0
- * - activeDynasties 为空 Set → 全部 0.15（视觉上"全部关闭"的状态）
- * - 否则：节点的 _dynasty 在集合内 → 1.0；不在 → 0.15
- * - 每年帧 lerp 到 target（dampening factor 0.18，避免突变）
- * - 每帧重写 material.opacity = _baseOpacity * _dynMul（依赖 setNodeState 写入 _baseOpacity）
- */
 const _activeSetCache = { ref: null, set: null }
 function getActiveSet() {
   const ad = props.activeDynasties
-  if (ad == null) return null  // 全激活语义
+  if (ad == null) return null
   if (ad === _activeSetCache.ref) return _activeSetCache.set
   const s = ad instanceof Set ? ad : new Set(ad)
   _activeSetCache.ref = ad
   _activeSetCache.set = s
   return s
 }
-const DYNASTY_DIM = 0.15  // 非活跃朝代的乘子（"褪色"而非"消失"）
-const DYNASTY_LERP = 0.18  // 每帧 lerp 系数（越接近 1 越快）
+const DYNASTY_DIM = 0.15
+const DYNASTY_LERP = 0.18
 
-function applyDynastyDim() {
-  if (!nodesGroup || !nodesGroup.children.length) return
+function updateDynastyDim(frame) {
+  if (frame % DIM_FRAME_INTERVAL !== 0) return
+  if (registry.size === 0) return
   const activeSet = getActiveSet()
-  for (const n of nodesGroup.children) {
-    if (n.userData?.type !== 'person') continue
-    const dy = n.userData._dynasty
-    // null dynasty（无生年）一律按活跃处理，避免误淡
-    const isActive = activeSet == null
-      ? true
-      : (dy == null ? true : activeSet.has(dy))
-    n.userData._dynMulTarget = isActive ? 1.0 : DYNASTY_DIM
-    // lerp 平滑过渡
-    const cur = n.userData._dynMul ?? 1.0
-    const next = cur + (n.userData._dynMulTarget - cur) * DYNASTY_LERP
-    if (Math.abs(next - cur) < 0.001) continue  // 已接近目标，跳过
-    n.userData._dynMul = next
-    // 应用到所有有 _baseOpacity 的子材质
-    for (const child of n.children) {
+
+  if (activeSet !== _lastActiveSetRef) {
+    _lastActiveSetRef = activeSet
+    registry.forEach((m) => {
+      const dy = m.userData?._dynasty
+      const isActive = activeSet == null
+        ? true
+        : (dy == null ? true : activeSet.has(dy))
+      m.userData._dynMulTarget = isActive ? 1.0 : DYNASTY_DIM
+    })
+  }
+
+  registry.forEach((m) => {
+    const cur = m.userData._dynMul ?? 1.0
+    const tgt = m.userData._dynMulTarget ?? 1.0
+    const next = cur + (tgt - cur) * DYNASTY_LERP
+    if (Math.abs(next - cur) < 0.001) return
+    m.userData._dynMul = next
+    for (const child of m.children) {
       if (child.material && child.userData?._baseOpacity !== undefined) {
         child.material.opacity = child.userData._baseOpacity * next
       }
     }
-  }
+  })
 }
 
-/**
- * M6 字号自适应：按相机距离控制 nameLabel 可见性 + 字号
- * - 距离 > LABEL_FAR：全部隐藏（避免远景文字噪声）
- * - 距离 ∈ [LABEL_NEAR, LABEL_FAR]：top 30% by rank（最多 60）
- * - 距离 < LABEL_NEAR：top 60% by rank（最多 80）
- * - 朝代淡化（_dynMul < 0.5）→ 隐藏对应标签
- * - 字号：linear lerp 0.5（远）→ 1.2（近）
- * - 硬上限 80 标签（避免近景 500 节点全部 label 互相遮挡）
- */
 const LABEL_NEAR = 15
 const LABEL_FAR = 35
 const LABEL_SCALE_FAR = 0.5
 const LABEL_SCALE_NEAR = 1.2
 const LABEL_MAX = 80
 
-function applyLabelVisibility() {
-  if (!nodesGroup || !nodesGroup.children.length || !camera || !controls) return
-  const camPos = camera.position
-  const target = controls.target || new THREE.Vector3()
-  const dist = camPos.distanceTo(target)
-  const total = nodesGroup.children.length
+function updateLabels(camDist, distBucket) {
+  if (distBucket === _lastLabelBucket && registry.version === _lastLabelVersion) return
+  _lastLabelBucket = distBucket
+  _lastLabelVersion = registry.version
 
-  // 区间分段 → 决定哪些 rank 可见
+  if (registry.size === 0 || !camera || !controls) return
+  const total = registry.size
+
   let rankCutoff = 0
-  if (dist <= LABEL_FAR) {
-    if (dist > LABEL_NEAR) {
-      // 中距离：top 30%
+  if (camDist <= LABEL_FAR) {
+    if (camDist > LABEL_NEAR) {
       rankCutoff = Math.min(LABEL_MAX, Math.max(0, Math.floor(total * 0.3)))
     } else {
-      // 近距离：top 60% (但硬上限 80)
       rankCutoff = Math.min(LABEL_MAX, Math.max(0, Math.floor(total * 0.6)))
     }
   }
 
-  // 字号随距离缩放（远小近大）
-  const t = Math.max(0, Math.min(1, (LABEL_FAR - dist) / (LABEL_FAR - LABEL_NEAR)))
+  const t = Math.max(0, Math.min(1, (LABEL_FAR - camDist) / (LABEL_FAR - LABEL_NEAR)))
   const scale = LABEL_SCALE_FAR + (LABEL_SCALE_NEAR - LABEL_SCALE_FAR) * t
-  // 平滑 lerp 避免字号突变
-  const prevScale = applyLabelVisibility._prevScale ?? scale
-  const curScale = prevScale + (scale - prevScale) * 0.18
-  applyLabelVisibility._prevScale = curScale
 
-  for (const n of nodesGroup.children) {
-    const label = n.userData?._nameLabel
-    if (!label) continue
-    const dynMul = n.userData._dynMul ?? 1.0
-    const passesRank = (n.userData._rank ?? 0) < rankCutoff
+  const rankArr = registry.cullCache.rank
+  registry.forEach((m, i) => {
+    const label = m.userData?._nameLabel
+    if (!label) return
+    const dynMul = m.userData._dynMul ?? 1.0
+    const passesRank = rankArr[i] < rankCutoff
     label.visible = passesRank && dynMul > 0.5
     if (label.visible) {
-      label.scale.set(2.4 * curScale, 0.6 * curScale, 1)
+      label.scale.set(2.6 * scale, 0.8 * scale, 1)
     }
-  }
+  })
 }
+
+function updateTooltipPosition(node) {
+  if (!wrapperRef.value) return
+  const v = _tooltipVec
+  v.setFromMatrixPosition(node.matrixWorld)
+  v.project(camera)
+  const wrapperRect = wrapperRef.value.getBoundingClientRect()
+  const x = (v.x * 0.5 + 0.5) * wrapperRect.width
+  const y = (-v.y * 0.5 + 0.5) * wrapperRect.height
+  tooltipPos.value = { x, y }
+}
+
+/**
+ * 移除自动旋转（v4）— 用户投诉"内容堆叠"主因
+ * 保留用户手动旋转（拖动）+ flyToNode（搜索时飞向）
+ */
+let _lastFrameTime = 0
 
 function animate() {
   animationId = requestAnimationFrame(animate)
   if (!renderer || !scene || !camera) return
+  renderFrame()
+}
 
-  // Star field 呼吸
+function renderFrame() {
+  _frameCounter++
+  const now = performance.now()
+  const dt = _lastFrameTime ? (now - _lastFrameTime) / 1000 : 0.016
+  _lastFrameTime = now
+
+  const camPos = camera.position
+  const target = controls.target || new THREE.Vector3()
+  const camDist = camPos.distanceTo(target)
+  const distBucket = computeDistBucket(camDist)
+
+  // ★ LOD 切换：远景只显示 cluster blob，近景显示个体节点
+  const lod = computeLOD(camDist)
+  if (clusterGroup) {
+    clusterGroup.visible = lod === 0
+    clusterHaloGroup.visible = lod === 0
+  }
+  if (nodesGroup) {
+    // 视距 LOD per-node + cluster LOD 合成
+    //   nodeLod 2 (>45): 不可见，不参与 raycast
+    //   nodeLod 1 (18-45): 暗 0.3
+    //   nodeLod 0 (<18): 满显
+    //   cluster lod 0 (远): 全部 0；lod 1 (中): 0.3-0.5 fade；lod 2 (近): 满
+    registry.forEach((m) => {
+      if (m.userData._culled) return
+      const nodeLod = m.userData._lod ?? 0
+      if (nodeLod === 2) {
+        m.visible = false
+        return
+      }
+      m.visible = true
+      const dimMul = nodeLod === 1 ? 0.3 : 1.0
+      m.children.forEach((child) => {
+        if (child.userData?._baseOpacity !== undefined) {
+          const baseOp = child.userData._baseOpacity
+          if (lod === 0) {
+            child.material.opacity = 0
+          } else if (lod === 1) {
+            // 中景：opacity 在 0.3-0.5 之间（fade in）
+            const fade = (camDist - LOD_MID) / (LOD_FAR - LOD_MID)
+            child.material.opacity = baseOp * (0.3 + 0.2 * (1 - fade)) * dimMul
+          } else {
+            child.material.opacity = baseOp * dimMul
+          }
+        }
+      })
+    })
+  }
+
+  const camMoved =
+    camPos.distanceTo(_lastFrameCamPos) >= CULL_DIST_THRESHOLD ||
+    target.distanceTo(_lastFrameTarget) >= CULL_DIST_THRESHOLD
+  if (camMoved) {
+    _lastFrameCamPos.copy(camPos)
+    _lastFrameTarget.copy(target)
+  }
+
+  updateCulling(camDist, distBucket, camMoved)
+  updateDynastyDim(_frameCounter)
+  updateLabels(camDist, distBucket)
+
+  // 天文图规缓慢自转（保留 — 古代仪器运转感，幅度更小）
+  if (coordRings) {
+    coordRings.rotation.z = _frameCounter * 0.00015
+  }
+
+  // 星空 uTime
   if (starField?.userData.material) {
-    starField.userData.material.uniforms.uTime.value = performance.now() * 0.001
+    starField.userData.material.uniforms.uTime.value = now * 0.001
   }
 
-  // 视差：相机转动时背景轻微反向旋转（"深空感"）
-  if (celestialMap && camera) {
-    const t = performance.now() * 0.00005
-    celestialMap.rotation.z = t
+  // 边流光
+  if (edgesGroup) tickEdgeHighlight(edgesGroup, now * 0.001)
+
+  // Tooltip 跟随
+  if (store.hoveredNodeId) {
+    const mesh = findNodeById(store.hoveredNodeId)
+    if (mesh) updateTooltipPosition(mesh)
   }
 
-  controls?.update?.()
-
-  // M6 视锥裁剪 + 密度过滤（在 render 前应用）
-  applyCulling()
-
-  // M6 时间轴朝代淡化（每帧 lerp）
-  applyDynastyDim()
-
-  // M6 字号自适应（按相机距离控制 label 可见性 + 字号）
-  applyLabelVisibility()
-
-  // M6 飞白：hover 关联边 dashOffset 流光（仅更新 _highlighted=true 的边，开销小）
-  if (edgesGroup) tickEdgeHighlight(edgesGroup, performance.now() * 0.001)
-
-  // Tooltip 跟随（每帧 1 次，无 setInterval）
-  if (hoveredNode.value) updateTooltipPosition(hoveredNode.value)
-
+  controls?.update?.(dt)
   renderer.render(scene, camera)
 }
 
+function findNodeById(id) {
+  return registry.get(id)
+}
+
+function flyToNodeById(id, animate = true) {
+  const mesh = registry.get(id)
+  if (!mesh) return false
+  if (!animate) {
+    const target = mesh.position.clone()
+    controls.target.copy(target)
+    const newCamPos = target.clone().add(new THREE.Vector3(0, 0, 12))
+    const offset = newCamPos.clone().sub(target)
+    const radius = offset.length()
+    const phi = Math.acos(Math.max(-1, Math.min(1, offset.y / radius)))
+    const theta = Math.atan2(offset.x, offset.z)
+    controls._spherical = { radius, theta, phi }
+    controls._targetSpherical = { radius, theta, phi }
+    return true
+  }
+  flyToNode(camera, controls, registry, id, store, { distance: 12, duration: 1.0 })
+  return true
+}
+
+function highlightEdgesForNodeExternally(id, on = true) {
+  if (!edgesGroup) return
+  highlightEdgesForNode(edgesGroup, id, on, performance.now() * 0.001)
+}
+
+async function loadLayoutTrigger() {
+  const evt = new CustomEvent('nebula:load-layout', { bubbles: true })
+  wrapperRef.value?.dispatchEvent(evt)
+}
+
 watch(() => props.nodes, () => buildScene(), { deep: false })
-// M6 时间轴：activeDynasties 引用变化时清缓存，确保下一帧重新评估 _dynMulTarget
 watch(() => props.activeDynasties, () => {
   _activeSetCache.ref = null
   _activeSetCache.set = null
@@ -488,7 +756,10 @@ watch(() => props.activeDynasties, () => {
 onMounted(() => {
   initThree()
   buildScene()
+  // ★ 移除 setupAutoRotateDetection() — v4 已移除自动旋转
   animate()
+
+  uninstallMiddleware = installNebulaMiddleware(store, () => canvasExpose)
 })
 
 onBeforeUnmount(() => {
@@ -498,50 +769,72 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   renderer?.dispose?.()
   renderer?.domElement?.parentNode?.removeChild(renderer.domElement)
-  // M6 飞白：释放所有 LineMaterial（_allMaterials Set）
   disposeLineMaterials()
+  uninstallMiddleware?.()
+  store.killFlyTween()
 })
 
-// ============================================================
-// M7 联动：子图节点双击 → 主画布相机飞向
-// ============================================================
-function findNodeById(id) {
-  if (!nodesGroup || !id) return null
-  for (const child of nodesGroup.children) {
-    if (child.userData?.type !== 'person') continue
-    const u = child.userData
-    if (u.id === id || u.uri === id) return child
-  }
-  return null
-}
-
-function flyToNodeById(id) {
-  const mesh = findNodeById(id)
-  if (!mesh) return false
-  // 还原所有 selected 状态
-  for (const child of nodesGroup.children) {
-    if (child.userData?.type === 'person' && child.userData.state === 'selected') {
-      setNodeState(child, 'idle')
+const canvasExpose = {
+  findNodeById,
+  flyToNode: flyToNodeById,
+  highlightEdges: highlightEdgesForNodeExternally,
+  clearEdgeHighlight: () => {
+    if (!edgesGroup) return
+    for (const line of edgesGroup.children) {
+      if (line.userData?._highlighted) {
+        highlightEdgesForNode(edgesGroup, line.userData.source || line.userData.target, false, 0)
+      }
     }
-  }
-  flyToNode(camera, controls, mesh, () => {
-    setNodeState(mesh, 'selected')
-  })
-  return true
+  },
+  edgesGroup,
+  registry,
+  loadLayout: loadLayoutTrigger,
 }
 
-defineExpose({ flyToNode: flyToNodeById })
+defineExpose({
+  flyToNode: flyToNodeById,
+  findNodeById,
+  edgesGroup,
+  registry,
+})
 </script>
 
 <style scoped>
 .nebula-canvas-wrapper {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
 .nebula-canvas-inner {
   width: 100%;
   height: 100%;
   position: relative;
+}
+
+.nebula-tooltip {
+  position: absolute;
+  pointer-events: none;
+  padding: 6px 12px;
+  background: rgba(13, 13, 18, 0.92);
+  border: 1px solid var(--xingye-vermilion-seal);
+  border-radius: 3px;
+  color: var(--xingye-rice-bright);
+  font-family: var(--xingye-font-display);
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  z-index: 100;
+  box-shadow: 0 0 12px rgba(194, 54, 42, 0.4);
+  transform: translate(12px, -50%);
+}
+.nebula-tooltip-name {
+  color: var(--xingye-gold-bright);
+  font-size: 14px;
+}
+.nebula-tooltip-dynasty {
+  color: var(--xingye-rice-dim);
+  font-size: 11px;
+  margin-top: 2px;
+  letter-spacing: 0.2em;
 }
 </style>
