@@ -172,10 +172,19 @@ def compute_fa2_layout(
     coords = np.array(result, dtype=np.float32)
     radii = node_sizes.astype(np.float32)
 
-    # 居中 + 归一化到 [-100, 100]
+    # 居中 + outlier-aware 归一化
+    #  v3 修：v2 用 99 分位 max abs，但没 clip，outlier 仍被乘以 9.4 飞到 ±900。
+    #  v3 改：先 clip 到 99 分位（outlier 压到边界），再归一化到 ±100。
+    #  效果：99% 节点铺到 ±100，1% outlier 紧贴 ±100 边界不飞走。
     coords -= coords.mean(axis=0)
-    scale = max(np.abs(coords).max(), 1e-6) / 100.0
-    coords /= scale
+    abs_x_99 = float(np.percentile(np.abs(coords[:, 0]), 99))
+    abs_y_99 = float(np.percentile(np.abs(coords[:, 1]), 99))
+    abs_x_99 = max(abs_x_99, 1e-6)
+    abs_y_99 = max(abs_y_99, 1e-6)
+    coords[:, 0] = np.clip(coords[:, 0], -abs_x_99, abs_x_99)
+    coords[:, 1] = np.clip(coords[:, 1], -abs_y_99, abs_y_99)
+    coords[:, 0] *= 100.0 / abs_x_99
+    coords[:, 1] *= 100.0 / abs_y_99
 
     print(f"      FA2 完成 ({time.time()-t:.2f}s)，坐标已归一化到 [-100, 100]")
     return coords, radii
