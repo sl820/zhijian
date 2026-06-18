@@ -46,10 +46,16 @@ def _uri_tail(uri: str) -> str:
     return uri.rstrip("/").rsplit("/", 1)[-1]
 
 
-def _get_person_meta(source: str) -> Dict[str, Dict]:
-    """取 source 对应的人物元数据（带缓存）。首次扫描 ~4s，之后 < 50ms。"""
-    if source in _PERSON_META_CACHE:
-        return _PERSON_META_CACHE[source]
+def _get_person_meta(source: str, needed_tails: set = None) -> Dict[str, Dict]:
+    """取 source 对应的人物元数据（带缓存）。首次扫描 ~10s，之后 < 50ms。
+
+    needed_tails: 若提供，仅缓存这些 URI tail 对应的条目（节省内存）。
+                  同一 source 第二次调用若 needed_tails 不同则强制重扫。
+    """
+    cache_key = source
+    cached = _PERSON_META_CACHE.get(cache_key)
+    if cached is not None and (needed_tails is None or cached.get("_needed_tails") == needed_tails):
+        return cached["meta"]
     meta: Dict[str, Dict] = {}
     if source == "jiapu" and source_router.is_enabled(source):
         try:
@@ -57,12 +63,18 @@ def _get_person_meta(source: str) -> Dict[str, Dict]:
             import sqlite3
             conn = sqlite3.connect(str(src_cfg["path"]))
             conn.row_factory = sqlite3.Row
-            for r in conn.execute("""
+            # 不带 birthday 过滤：npz 抽样不限生日，只保留 needed_tails 命中
+            rows = conn.execute("""
                 SELECT uri, label_chs, label_cht, label_en, family_name, role_of_family,
                        courtesy_name, description, gender, birthday
                 FROM persons
-                WHERE birthday IS NOT NULL AND birthday != ''
-            """):
+            """)
+            for r in rows:
+                tail = _uri_tail(r["uri"] or "")
+                if not tail:
+                    continue
+                if needed_tails is not None and tail not in needed_tails:
+                    continue
                 from .jiapu_query import _row_to_person
                 p = _row_to_person(r)
                 raw_birthday = (r["birthday"] or "").strip()
@@ -72,9 +84,6 @@ def _get_person_meta(source: str) -> Dict[str, Dict]:
                         birth_year = int(raw_birthday)
                     except ValueError:
                         birth_year = None
-                tail = _uri_tail(p.get("uri", ""))
-                if not tail:
-                    continue
                 meta[tail] = {
                     "name": p.get("name", ""),
                     "category": p.get("person_type", 2),
@@ -82,11 +91,11 @@ def _get_person_meta(source: str) -> Dict[str, Dict]:
                     "birth_year": birth_year,
                 }
             conn.close()
-            logger.info(f"[layout] person_meta 缓存预热完成（{source}）: {len(meta)} 条")
+            logger.info(f"[layout] person_meta 缓存预热完成（{source}）: {len(meta)} 条 / needed={len(needed_tails) if needed_tails else 'all'}")
         except Exception as e:
             # 竞赛交付：失败时显式 log + 继续（filter 失效但 layout 数据可正常返回）
             logger.warning(f"[layout] person_meta 加载失败（{source}）: {str(e)[:200]}，category/dynasty filter 失效但 layout 正常返回")
-    _PERSON_META_CACHE[source] = meta
+    _PERSON_META_CACHE[cache_key] = {"meta": meta, "_needed_tails": needed_tails}
     return meta
 
 
@@ -223,9 +232,11 @@ def get_layout_subset(
     edge_dst: np.ndarray = layout["edge_dst"]
     is_fallback: bool = bool(layout.get("_fallback", False))
 
-    # 1. 取人物元数据（首次扫描 ~4s，缓存后 < 50ms）
+    # 1. 取人物元数据（首次扫描 ~10s，缓存后 < 50ms）
     # 按 URI tail 索引，兼容 layout 的无 /jp/ vs DB 的有 /jp/
-    person_meta: Dict[str, Dict] = _get_person_meta(source)
+    # 只缓存 npz 命中的 5k 条目，内存可控
+    needed_tails = {_uri_tail(str(u)) for u in node_ids.tolist() if u}
+    person_meta: Dict[str, Dict] = _get_person_meta(source, needed_tails)
 
     # 2. 按 bbox 过滤
     if bbox:
