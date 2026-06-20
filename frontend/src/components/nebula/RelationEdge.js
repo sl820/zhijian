@@ -44,7 +44,7 @@ function makeLineMaterial(colorHex, width) {
     linewidth: width,           // 世界单位宽度（worldUnits: true）
     worldUnits: true,
     transparent: true,
-    opacity: 0.55,
+    opacity: 0.25,              // 0.55→0.25：缓解 31620 边叠加成黑块
     dashed: true,
     dashSize: 1.0,
     gapSize: 0.4,
@@ -76,7 +76,9 @@ export function createRelationEdge(edge, positions) {
   line.userData = {
     ...edge,
     type: 'relation',
-    baseOpacity: 0.55,
+    sourceId: edge.source,
+    targetId: edge.target,
+    baseOpacity: 0.25,
     baseColor: new THREE.Color(PALETTE.ink.main),
     baseWidth: lineWidth,
   }
@@ -145,6 +147,21 @@ export function tickEdgeHighlight(edgesGroup, time) {
   })
 }
 
+/**
+ * LOD 边过滤：只显示两端节点都在可见 Set 内的边
+ * @param {THREE.Group} edgesGroup
+ * @param {Set<string>} visibleNodeIds
+ */
+export function filterEdgesByLOD(edgesGroup, visibleNodeIds) {
+  if (!edgesGroup) return
+  for (const line of edgesGroup.children) {
+    const s = line.userData.sourceId
+    const t = line.userData.targetId
+    const keep = s && t && visibleNodeIds.has(s) && visibleNodeIds.has(t)
+    if (line.visible !== keep) line.visible = keep
+  }
+}
+
 export default {
   createRelationEdge,
   createRelationEdges,
@@ -152,4 +169,5 @@ export default {
   setLineMaterialsResolution,
   disposeLineMaterials,
   tickEdgeHighlight,
+  filterEdgesByLOD,
 }

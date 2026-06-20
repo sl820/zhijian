@@ -206,8 +206,18 @@ function normalizeCoords(nodes) {
     n._wy = ((n.y ?? 0) - cy) / range * WORLD_SCALE_XY
 
     const dy = yearToDynasty(n.birth_year)
-    const layerZ = DYNASTY_Z_LAYER[dy] ?? 0
-    // 每层内部 jitter（z 维度 ± Z_LAYER_RANGE）
+    // v6：birth_year null 时按 degree 排名做 z 代理（91% 节点无年份，z 维度死）
+    //   hub 节点（高 degree）放外层 z=±1.5，长尾节点压中段 z=0
+    //   模拟"主干 vs 支流"立体感
+    let layerZ
+    if (dy !== null) {
+      layerZ = DYNASTY_Z_LAYER[dy] ?? 0
+    } else {
+      const deg = n.degree ?? 0
+      const degMax = 300
+      const norm = Math.min(1, deg / degMax)
+      layerZ = (norm - 0.5) * 3.0
+    }
     n._wz = layerZ * WORLD_SCALE_Z + (Math.random() - 0.5) * Z_LAYER_RANGE
     n._dynasty = dy
   }
@@ -422,17 +432,17 @@ function buildScene() {
     return
   }
 
-  const normalized = normalizeCoords([...props.nodes])
-
-  // 从 edges 计算每个节点的 degree（决定 3D 球体半径）
+  // 先算 degree（normalizeCoords 内部 z fallback 要读 n.degree）
   const degreeMap = new Map()
   for (const e of props.edges) {
     degreeMap.set(e.source, (degreeMap.get(e.source) || 0) + 1)
     degreeMap.set(e.target, (degreeMap.get(e.target) || 0) + 1)
   }
-  for (const node of normalized) {
+  for (const node of props.nodes) {
     node.degree = degreeMap.get(node.id) || 0
   }
+
+  const normalized = normalizeCoords([...props.nodes])
 
   // ★ 创建聚合 blob（5000 节点 → ~50 个 InstancedMesh 球）
   const clusters = clusterNodes(normalized)

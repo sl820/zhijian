@@ -45,12 +45,12 @@ export function createStarField(starCount = 5000) {
   geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1))
   geometry.setAttribute('phase', new THREE.BufferAttribute(phases, 1))
 
-  // 自定义 shader：圆点 + 呼吸亮度 + 米白色
+  // 自定义 shader：圆点 + 呼吸亮度 + 淡墨色（北宋方志博物 · 纸纹点）
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
-      uColor: { value: new THREE.Color(PALETTE.rice.main) },
-      uBrightColor: { value: new THREE.Color(PALETTE.rice.bright) },
+      uColor: { value: new THREE.Color(PALETTE.ink.pale) },
+      uBrightColor: { value: new THREE.Color(PALETTE.ink.mid) },
     },
     vertexShader: `
       attribute float size;
@@ -63,7 +63,7 @@ export function createStarField(starCount = 5000) {
         gl_Position = projectionMatrix * mvPosition;
         // 呼吸亮度（周期 3-7 秒，随机 phase）
         float breath = sin(uTime * 0.6 + phase) * 0.5 + 0.5;
-        vBrightness = 0.4 + breath * 0.6;
+        vBrightness = 0.3 + breath * 0.5;
       }
     `,
     fragmentShader: `
@@ -71,18 +71,19 @@ export function createStarField(starCount = 5000) {
       uniform vec3 uBrightColor;
       varying float vBrightness;
       void main() {
-        // 圆形 mask（避免方形星点）
+        // 圆形 mask（避免方形点）
         vec2 coord = gl_PointCoord - vec2(0.5);
         float dist = length(coord);
         if (dist > 0.5) discard;
         float alpha = (1.0 - dist * 2.0) * vBrightness;
         vec3 color = mix(uColor, uBrightColor, vBrightness);
-        gl_FragColor = vec4(color, alpha * 0.85);
+        // 改 normal blending — additive 在浅色纸上会过亮
+        gl_FragColor = vec4(color, alpha * 0.55);
       }
     `,
     transparent: true,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    blending: THREE.NormalBlending,
   })
 
   const points = new THREE.Points(geometry, material)
@@ -102,7 +103,7 @@ export function createCelestialMapTexture(size = 1024) {
   const ctx = canvas.getContext('2d')
 
   // 靛蓝底
-  ctx.fillStyle = PALETTE.indigo.deep
+  ctx.fillStyle = PALETTE.ink.main
   ctx.fillRect(0, 0, size, size)
 
   // 同心圆（古天文图的"规"）

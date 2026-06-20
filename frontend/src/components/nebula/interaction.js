@@ -325,6 +325,22 @@ export class SimpleOrbitControls {
         this._flyYaw = Math.atan2(fx, fz)
         this._flyPitch = Math.asin(Math.max(-1, Math.min(1, fy)))
       }
+    } else {
+      // fly → orbit 切换：从当前 camera.position + target 反推 spherical
+      //   否则下一帧 update() 用 _spherical 初始值 (30, 0, π/2) 把相机 teleport 走
+      //   同样 target 留在 fly 期间的 camera.position + forward*80，需要复位
+      const offset = _tmpCamOffset.subVectors(this.camera.position, this.target)
+      const len = offset.length()
+      if (len > 1e-4) {
+        this._spherical.radius = this._targetSpherical.radius = len
+        this._spherical.phi = this._targetSpherical.phi =
+          Math.acos(Math.max(-1, Math.min(1, offset.y / len)))
+        this._spherical.theta = this._targetSpherical.theta = Math.atan2(offset.x, offset.z)
+      }
+      // target 复位为相机前方 spherical.radius 单位（避免 fly 留下的 80 单位前瞻）
+      this.target.copy(this.camera.position).add(
+        _tmpFwd.set(0, 0, -this._spherical.radius),
+      )
     }
     this._onFlyModeChange?.(enabled)
   }
