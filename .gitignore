@@ -119,3 +119,32 @@ zhijian_pkg2/
 
 # Temp test fixtures
 tests/_tmp_*.json
+
+# === 志鉴 v2 ===
+# React + Vite + Three.js
+.vite/
+*.tsbuildinfo
+
+# Static data ETL output (committed as-is, but ignore temp/large)
+public/persons/*.tmp
+public/layouts/*.tmp
+public/layouts/*.bak
+
+# Local config
+.env.local
+.env.*.local
+!.env.example
+
+# Test artifacts
+coverage/
+.nyc_output/
+
+# Python ETL (should not be committed)
+.venv/
+__pycache__/
+*.pyc
+
+# Old v1 remnants
+test_chroma/
+zhijian_pkg2/
+zhijian_deploy/zhijian_*.tar.gz

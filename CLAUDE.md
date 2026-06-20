@@ -1,55 +1,95 @@
-# CLAUDE.md — 志鉴项目约定
+# CLAUDE.md — 志鉴 v2
 
-## 项目概述
-古籍方志智能化整理与知识服务平台，2026年中国大学生计算机设计大赛参赛作品。
-**精简版三大模块**：OCR 古籍识别、知识图谱、RAG 智能问答。
+## 项目定位
+
+志鉴·家谱星图（Jiapu XingTu）。把上海图书馆开放数据中 33 万家谱人物以三维星系方式呈现：每位先祖是一颗星，每条支系有自己的空间坐标。仿照 [`Cohenjikan/shiyun`](https://github.com/Cohenjikan/shiyun) 诗云 Poetry Cloud 的纯静态架构。
+
+**v1 已归档到 `archive/v1/`**（FastAPI + Vue 3 + ChromaDB + Ollama RAG）。本分支 `zhijian-v2-shiyun-style` 是 v2 重做。
 
 ## 技术栈
-- 后端：FastAPI + Python 3.10+（Python 3.10/3.11/3.12 均可；3.13 上 PaddleOCR 不可用但 RapidOCR 仍 OK）
-- OCR：**RapidOCR（默认·ONNX 后端）** > Aliyun OCR（云端·高精度·需 APP_CODE） > EasyOCR（兜底）> PaddleOCR（Linux/Mac 备选）
-- NLP：BERT (bert-base-chinese) + BGE (bge-base-chinese-v1.5)
-- 向量数据库：ChromaDB（实际使用）/ Milvus（可选）
-- 前端：Vue3 + Vite + Element Plus + ECharts
-- LLM：Ollama + Qwen2.5:3B（本地 / localhost:11434）
+
+- **前端**：React 18 + TypeScript + Vite（弃 Vue 3）
+- **3D**：three.js + @react-three/fiber + drei + postprocessing
+- **状态**：zustand
+- **辅助**：opencc-js（简繁）、pinyin-pro（拼音）
+- **构建门禁**：`tsc + vitest + vite build` 全绿
+- **部署**：纯静态（GitHub Pages），HTTP Range 取片
+- **数据 ETL**：Python 3.10+ 离线 pipeline（不部署）
+
+## 核心架构：诗云 4 稳定接口
+
+```
+src/
+├── engine/         # 引擎层：FA2 真布局（生产）+ rank/unrank 双射（PoC）
+├── data/           # 数据契约 + Range 取片 + 加载
+├── three/          # 3D 渲染样壳（可任意重写）
+├── ui/             # UI 样壳（可任意重写）
+├── state/          # zustand store + permalink
+├── App.tsx
+└── main.tsx
+```
+
+四个稳定边界（**任何重写都不能破坏**）：
+1. `data/load.ts` — `loadPerson / loadLine / loadAncestors / searchSurname`
+2. `engine/engineApi.ts` — `pullAt / unrankPerson / rankPerson`
+3. `data/position.ts` — `personPosition(personId) → {dynasty, angle, z}`
+4. `state/store.ts` — zustand：selectedPerson / selectedLine / flyTarget / filters
 
 ## 关键约定
-- 后端入口：`app/main.py`，端口 8000
-- 前端入口：`frontend/`，端口 3000，Vite 代理 `/api` → `http://localhost:8000`
-- API 路由前缀：`/api/v1/`
-- 虚拟环境忽略：`.venv_paddle/`、`node_modules/` 已在 .gitignore
-- 模型权重不进仓库（models/*.pth 已 gitignore，RapidOCR 走 `~/.rapidocr/`，EasyOCR 走 `~/.EasyOCR/model/`）
-- 数据文件在 `data/raw/`，按版本分目录（1998/, kangxi/, xianfeng/ 等）
-- 临时文件和日志不进仓库（*.log, temp_* 已 gitignore）
-- **OCR 是可选重型依赖**：默认装 `rapidocr-onnxruntime`（轻量，~30MB）。EasyOCR/PaddleOCR/Aliyun 均按需。Aliyun OCR 走环境变量 `ALIYUN_OCR_APP_CODE`，未配置则按钮隐藏
 
-## 项目结构约定
-```
-app/ocr/              # ①OCR（重建）：processor, recognizer, preprocess, variant_map, ocr_service
-app/ocr/providers/    #   OCR 引擎实现：base, easyocr, paddleocr, rapidocr（默认）, aliyun(可关)
-app/database/         # ②知识图谱存储：chroma_client, kg_service
-app/rag/              # ③RAG：rag_service, chunker, embedder, retriever, generator
-app/kg/               #   KG 抽取 pipeline：实体/关系抽取
-app/api/              # API 路由：routes.py（~700行）
-app/llm/              # LLM 客户端：ollama_client, llama_cpp_client
-scripts/              # 工具脚本
-frontend/src/views/   # Vue 视图：Home, OCR, Knowledge, QA
-frontend/src/stores/  # Pinia stores：app, ocr
-```
+- **纯静态、永不加后端**。若要 RAG/LLM，重新评估是否值得，**默认不做**。
+- **数据 ETL 离线跑一次**，产物（`public/persons/*.json` + `public/layouts/jiapu_v2.npz`）进 git 或 CDN，不在运行时计算。
+- **永久链接**：`#a=<personId>` / `#p=<谱名>.<代数>.<支号>` / `#l=<lineId>` / `#g=<generation>`
+- **三种 pull 模式**（家谱版）：
+  - 「纯随机支系」N^代数笛卡尔积
+  - 「谱例约束」嫡长子继承 / 不娶同姓
+  - 「名/字常用字」按谱中真出现过的字过滤
+- **门禁**：每个 session 结束必须 `npm test && npm run build` 全绿，写完 DEVLOG 才能 push
+- **数据根（仓库外）**：`D:/上海图书馆开放数据/data/shlib_jiapu.db`（1.68M persons / 13K relations / 588K cbdb_relations）
+
+## 工作流
+
+1. 接到任务先看 `docs/DEVLOG.md` + `docs/devlog/HANDOFF.md` 上下文
+2. 大改动先 Plan Mode（plan 文件存 `~/.claude/plans/`）
+3. 改完跑验证（`npm test && npm run build`）
+4. 写 DEVLOG session 增量
+5. **先 commit 再验证**（按用户偏好）
+6. push 前问（CLAUDE.md 红线）
+
+## 与 v1 的关系
+
+| v1 资产 | v2 处置 |
+|---|---|
+| `scripts/precompute_layout.py` (FA2 真布局) | 复制到 `pipeline/precompute_layout.py`，跑 33 万全量 |
+| `data/layouts/jiapu_v1.npz` (5k FA2) | v2 跑 33 万，输出 `public/layouts/jiapu_v2.npz` |
+| `frontend/src/components/nebula/*.js` (Vue) | 仅作参考，v2 用 React + @react-three 重写 |
+| `app/` (FastAPI 全部) | 归档到 `archive/v1/app/`，v2 不部署 |
+| `app/rag/`、`app/ocr/`、`app/research/` | 归档到 `archive/v1/`，v2 不复刻 |
+| `chroma_zhijian/` (67MB RAG) | 删除（gitignored） |
+| `.venv_paddle/` (5.9GB) | 删除（gitignored） |
+
+## 工程铁律
+
+- 改完跑 `npm test && npm run build`，不只改不验
+- 不注释报错、不加绕过标记，找根因
+- 密钥/token/密码不进代码、不进 commit、不进日志
+- 大改动前先 Plan Mode，我确认后再动手
+- 不做"为未来可能需求"设计的过度抽象
+- 不写无意义注释（注释"做什么"的不写；"为什么这样做"的非显然约束才写）
 
 ## 验证命令
-```bash
-# 后端测试
-cd /d/zhijian && python -m pytest tests/ -v --tb=short
-# 前端构建
-cd /d/zhijian/frontend && npm run build -- --emptyOutDir
-# 启动后端
-cd /d/zhijian && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-# 启动前端
-cd /d/zhijian/frontend && npm run dev
-```
 
-## 不要做的事
-- 不要硬编码绝对路径，用 `Path(__file__).parent.parent` 相对定位
-- 不要提交 API key 或密码（Neo4j 密码已暴露但仅本地开发用）
-- 不要升级 Python 到 3.13（PaddleOCR PIR 不兼容）
-- 不要在根目录创建临时测试文件
+```bash
+# 前端测试 + 构建
+cd /d/zhijian && npm test
+cd /d/zhijian && npm run build
+
+# 数据 ETL（Python 离线）
+cd /d/zhijian && python pipeline/extract_persons.py
+cd /d/zhijian && python pipeline/pack_data.py
+cd /d/zhijian && python pipeline/precompute_layout.py    # 33 万 FA2 全量
+cd /d/zhijian && python pipeline/validate_pipeline.py    # 单测 + 全量一致性
+
+# 启动前端
+cd /d/zhijian && npm run dev          # http://localhost:5173
+```

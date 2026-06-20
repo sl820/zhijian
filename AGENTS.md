@@ -1,55 +1,78 @@
-# AGENTS.md — 志鉴项目约定
+# AGENTS.md — 志鉴 v2 多 agent 协作约定
 
-## 项目概述
-古籍方志智能化整理与知识服务平台，2026年中国大学生计算机设计大赛参赛作品。
-**精简版三大模块**：OCR 古籍识别、知识图谱、RAG 智能问答。
+## 默认分工
 
-## 技术栈
-- 后端：FastAPI + Python 3.10+（Python 3.10/3.11/3.12 均可；3.13 上 PaddleOCR 不可用但 RapidOCR 仍 OK）
-- OCR：**RapidOCR（默认·ONNX 后端）** > Aliyun OCR（云端·高精度·需 APP_CODE） > EasyOCR（兜底）> PaddleOCR（Linux/Mac 备选）
-- NLP：BERT (bert-base-chinese) + BGE (bge-base-chinese-v1.5)
-- 向量数据库：ChromaDB（实际使用）/ Milvus（可选）
-- 前端：Vue3 + Vite + Element Plus + ECharts
-- LLM：Ollama + Qwen2.5:3B（本地 / localhost:11434）
+志鉴 v2 工作流以**单一 lead agent**为主，按需派生 Explore / Plan / general-purpose 子 agent：
 
-## 关键约定
-- 后端入口：`app/main.py`，端口 8000
-- 前端入口：`frontend/`，端口 3000，Vite 代理 `/api` → `http://localhost:8000`
-- API 路由前缀：`/api/v1/`
-- 虚拟环境忽略：`.venv_paddle/`、`node_modules/` 已在 .gitignore
-- 模型权重不进仓库（models/*.pth 已 gitignore，RapidOCR 走 `~/.rapidocr/`，EasyOCR 走 `~/.EasyOCR/model/`）
-- 数据文件在 `data/raw/`，按版本分目录（1998/, kangxi/, xianfeng/ 等）
-- 临时文件和日志不进仓库（*.log, temp_* 已 gitignore）
-- **OCR 是可选重型依赖**：默认装 `rapidocr-onnxruntime`（轻量，~30MB）。EasyOCR/PaddleOCR/Aliyun 均按需。Aliyun OCR 走环境变量 `ALIYUN_OCR_APP_CODE`，未配置则按钮隐藏
+| 任务类型 | 用谁 |
+|---|---|
+| 查文件 / 定位符号 / 摸代码 | `Explore` |
+| 出实现方案 | `Plan`（或在 lead 内 Plan Mode） |
+| 跨多文件调研（3+ query） | `Explore` |
+| 复杂多步（并行子任务） | `general-purpose` |
+| 大块代码生成 + 验证 | `lead` 主线 |
 
-## 项目结构约定
+## Lead agent 工作节奏
+
+每个 session（一次对话）按诗云模板：
+
+1. **接任务** → 看 `docs/DEVLOG.md` 上下文（最近 session 摘要）
+2. **Plan**（如涉及大改动）→ Plan Mode 出方案 → ExitPlanMode 等用户批准
+3. **改代码** → 改完跑验证（`npm test && npm run build`）
+4. **写 DEVLOG** → 在 `docs/devlog/YYYY-MM-DD-session-N.md` 写本 session 增量
+5. **commit** → 按用户偏好"先 commit 再验证"
+
+## 子 agent 调用规则
+
+- **Explore**：传 1 个明确目标 + 文件路径（不要笼统"摸一下"）
+- **Plan**：传 Phase 1 调研结果 + 约束条件；要求给 step-by-step
+- **general-purpose**：必须写 `必须加载 web-access skill 并遵循指引`（如需联网）
+- **避免**：
+  - 子 agent 干 lead 该干的事（如：写文档、改 CLAUDE.md）
+  - 重复劳动：subagent 已经搜过的，lead 不要重复搜
+  - prompt 里暗示手段（"搜索"会锚定到 WebSearch）；写目标（"调研"/"获取"）
+
+## 文档约定
+
+- **MEMORY.md**：跨 session 索引，每条 ≤ 150 字符
+- **CLAUDE.md**：项目级铁律，红线、约定、工作流
+- **AGENTS.md**：agent 分工（本文档）
+- **DEVLOG**：session 级协作记录，每 session 一篇
+- **docs/devlog/HANDOFF.md**：跨 session 上下文接力（最近 60KB）
+
+## DEVLOG 模板
+
+每个 session 文档含：
+
+```markdown
+# YYYY-MM-DD Session N · <一句话主题>
+
+## Context
+- 上次 session 留下的挂账：...
+- 本次触发：...
+
+## Decisions
+- 决策 1: <决策>。原因：<为什么>
+- 决策 2: ...
+
+## Changes
+- commit `<hash>`: <一句话>
+- file path:line — <改了什么>
+
+## Verification
+- npm test: PASS
+- npm run build: PASS
+- 浏览器端到端: ...
+
+## Outstanding / 挂账
+- [ ] 待办 1
+- [ ] 待办 2
 ```
-app/ocr/              # ①OCR（重建）：processor, recognizer, preprocess, variant_map, ocr_service
-app/ocr/providers/    #   OCR 引擎实现：base, easyocr, paddleocr, rapidocr（默认）, aliyun(可关)
-app/database/         # ②知识图谱存储：chroma_client, kg_service
-app/rag/              # ③RAG：rag_service, chunker, embedder, retriever, generator
-app/kg/               #   KG 抽取 pipeline：实体/关系抽取
-app/api/              # API 路由：routes.py（~700行）
-app/llm/              # LLM 客户端：ollama_client, llama_cpp_client
-scripts/              # 工具脚本
-frontend/src/views/   # Vue 视图：Home, OCR, Knowledge, QA
-frontend/src/stores/  # Pinia stores：app, ocr
-```
 
-## 验证命令
-```bash
-# 后端测试
-cd /d/zhijian && python -m pytest tests/ -v --tb=short
-# 前端构建
-cd /d/zhijian/frontend && npm run build -- --emptyOutDir
-# 启动后端
-cd /d/zhijian && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-# 启动前端
-cd /d/zhijian/frontend && npm run dev
-```
+## 红线（与 CLAUDE.md 一致）
 
-## 不要做的事
-- 不要硬编码绝对路径，用 `Path(__file__).parent.parent` 相对定位
-- 不要提交 API key 或密码（Neo4j 密码已暴露但仅本地开发用）
-- 不要升级 Python 到 3.13（PaddleOCR PIR 不兼容）
-- 不要在根目录创建临时测试文件
+- 不删文件/目录/历史（除已规划的大爆炸清理）
+- 不改 .env / token / CI 配置（除非明确要求）
+- 不 git push 不 git rebase -i 不 git reset --hard
+- 不安装全局依赖
+- 公开操作（npm publish / 部署 / 发文）必须先问
