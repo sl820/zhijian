@@ -1,57 +1,83 @@
 <!--
-  志鉴·星野图谱 KnowledgeView（M6 重写）
-  替代旧的 ECharts 2D 力导向，用 three.js 3D + 服务端 FA2 预布局 + 视锥裁剪 + 视差星空背景
+  志鉴·星野图考 KnowledgeView（v2 - 接入 nebula store）
 
-  Why：星野图考美学是产品核心差异化（靛蓝底 + 留白星点 + 朱砂节点 + 墨黑边 + 金粉高光）。
+  改造（2026-06-17）：
+    - 删除 selectedNode / filterCategory / filterDynasty / activeDynasties / searchToast 内部 ref
+    - 改用 useNebulaStore 单一真源
+    - v-model 改 :value + @change（写入 store）
+    - 搜索/筛选/时间轴事件写入 store，副作用由 middleware 集中处理
+    - 保留 template + style 全部结构（最小侵入式）
 -->
 <template>
   <div class="nebula-view">
+    <!-- 竞赛交付：SAFE MODE / DEGRADED 横幅 -->
+    <div v-if="healthStore.safeMode" class="nebula-safe-banner">
+      <span class="nebula-safe-banner-icon">⚠</span>
+      <span class="nebula-safe-banner-text">
+        系统处于降级模式（SAFE MODE）：部分功能已关闭，当前显示 {{ nodeLimit }} 颗节点上限。
+      </span>
+    </div>
+    <div v-else-if="healthStore.isDegraded" class="nebula-warn-banner">
+      <span class="nebula-warn-banner-icon">!</span>
+      <span class="nebula-warn-banner-text">
+        系统部分功能降级中（智能问答可能返回兜底答案），核心视图正常。
+      </span>
+    </div>
+
     <!-- 顶部栏 -->
     <header class="nebula-header">
       <div class="nebula-title">
         <span class="nebula-title-seal">星</span>
         <div>
           <div class="nebula-title-text">星野图考</div>
-          <div class="nebula-subtitle">XINGYE · 人物星云图谱</div>
+          <div class="nebula-subtitle">XINGYE · 北极天球立体投影 · 1247 苏州石刻天文图式</div>
         </div>
       </div>
       <div class="nebula-controls">
         <div class="nebula-search-box">
           <input
-            v-model="searchName"
+            :value="searchName"
+            @input="searchName = $event.target.value"
             placeholder="搜人物..."
             class="nebula-search-input"
             @keyup.enter="onSearchEnter"
           />
         </div>
-        <select v-model="selectedSource" class="nebula-btn" style="background:transparent">
+        <select :value="selectedSource" @change="onSourceChange" class="nebula-btn" style="background:transparent">
           <option v-for="s in sources" :key="s.id" :value="s.id">{{ s.name }}</option>
         </select>
-        <!-- M6 朝代/家族筛选（M6 筛选 UI） -->
-        <select v-model.number="filterCategory" class="nebula-btn" style="background:transparent" title="按家族分类筛">
-          <option :value="null">全部氏族</option>
-          <option :value="0">姓氏族</option>
-          <option :value="1">妻妾</option>
-          <option :value="3">官吏·文人</option>
-          <option :value="2">其它人物</option>
+        <!-- M6 朝代/家族筛选（写入 store） -->
+        <select
+          :value="filterCategory ?? ''"
+          @change="onCategoryChange"
+          class="nebula-btn"
+          style="background:transparent"
+          title="按家族分类筛"
+        >
+          <option value="">全部氏族</option>
+          <option value="0">姓氏族</option>
+          <option value="1">妻妾</option>
+          <option value="3">官吏·文人</option>
+          <option value="2">其它人物</option>
         </select>
         <input
-          v-model="filterDynasty"
+          :value="filterDynasty"
+          @input="onDynastyInput"
           placeholder="朝代子串..."
           class="nebula-btn nebula-btn-input"
           title="按 biography/name 子串筛朝代"
-          @keyup.enter="loadLayout"
+          @keyup.enter="triggerLoadLayout"
         />
-        <button v-if="filterCategory !== null || filterDynasty" class="nebula-btn nebula-btn-ghost" @click="clearFilters">
+        <button v-if="hasFilter" class="nebula-btn nebula-btn-ghost" @click="onClearFilters">
           清除
         </button>
-        <button class="nebula-btn" :disabled="loading" @click="loadLayout">
+        <button class="nebula-btn" :disabled="loading" @click="triggerLoadLayout">
           {{ loading ? '加载中...' : '刷新星图' }}
         </button>
       </div>
     </header>
 
-    <!-- 3D Canvas -->
+    <!-- 3D Canvas（不再监听 node-click / background-click：已迁到 store） -->
     <NebulaCanvas
       v-if="!loading && layoutNodes.length"
       ref="nebulaRef"
@@ -59,8 +85,7 @@
       :edges="layoutEdges"
       :loading="loading"
       :active-dynasties="activeDynasties"
-      @node-click="onNodeClick"
-      @background-click="onBackgroundClick"
+      @nebula:load-layout="triggerLoadLayout"
     />
 
     <!-- 加载状态 -->
@@ -78,7 +103,7 @@
       </button>
     </div>
 
-    <!-- 搜索提示 toast（仅搜索错误，短暂显示） -->
+    <!-- 搜索提示 toast（从 store 派生） -->
     <div v-if="searchToast" class="nebula-toast">{{ searchToast }}</div>
 
     <!-- 图例 -->
@@ -103,13 +128,8 @@
       </div>
     </div>
 
-    <!-- 节点详情面板（M7：名片 + 子图 + 证据 + RAG） -->
-    <PersonPanel
-      v-if="selectedNode"
-      :person="selectedNode"
-      @close="selectedNode = null"
-      @navigate="onNavigate"
-    />
+    <!-- 节点详情面板（从 store 读 selectedNodeData） -->
+    <PersonPanel />
 
     <!-- M6 朝代时间轴 -->
     <DynastyTimeline
@@ -129,7 +149,18 @@ import DynastyTimeline from '../components/nebula/DynastyTimeline.vue'
 import PersonPanel from '../components/person/PersonPanel.vue'
 import { kgAPI } from '../services/api.js'
 import { PALETTE, CATEGORY_COLORS, CATEGORY_NAMES } from '../constants/palette.js'
+import { useNebulaStore } from '../stores/nebula.js'
+import { useSystemHealthStore } from '../stores/systemHealth'
 
+const store = useNebulaStore()
+const healthStore = useSystemHealthStore()
+
+// 竞赛交付：节点上限取 systemHealth.demoNodeLimit（默认 5000）
+const nodeLimit = computed(() => healthStore.demoNodeLimit || 5000)
+
+// ============================================================
+// 搜索框本地 state（不需要进 store）
+// ============================================================
 const searchName = ref('')
 const selectedSource = ref('jiapu')
 const sources = ref([
@@ -141,18 +172,23 @@ const layoutNodes = ref([])
 const layoutEdges = ref([])
 const layoutMeta = ref({})
 const error = ref('')
-const searchToast = ref('')
-let searchToastTimer = null
-const selectedNode = ref(null)
 const nebulaRef = ref(null)
 
-// M6 筛选
-const filterCategory = ref(null)
-const filterDynasty = ref('')
+// ============================================================
+// 从 store 派生（不再持有副本）
+// ============================================================
+const filterCategory = computed(() => store.filterCategory)
+const filterDynasty = computed(() => store.filterDynasty)
+const activeDynasties = computed(() => store.activeDynasties)
+const searchToast = computed(() => store.searchToast)
+const hasFilter = computed(() => filterCategory.value !== null || !!filterDynasty.value)
+
 const totalInBbox = ref(0)
 const totalUnfiltered = ref(0)
 
-// M6 时间轴：朝代标签 + 激活集合（null = 全激活）
+// ============================================================
+// 朝代时间轴（M6）
+// ============================================================
 const dynastyLabels = [
   { id: 'pre_han',   label: '汉前/汉' },
   { id: 'three_jin', label: '三国/晋' },
@@ -166,7 +202,6 @@ const dynastyLabels = [
   { id: 'qing',      label: '清' },
   { id: 'modern',    label: '民国+' },
 ]
-// yearToDynasty：与 NebulaCanvas 内的同名函数保持一致
 function yearToDynasty(year) {
   if (year == null || isNaN(year)) return null
   const y = Number(year)
@@ -182,8 +217,6 @@ function yearToDynasty(year) {
   if (y < 1912) return 'qing'
   return 'modern'
 }
-
-const activeDynasties = ref(null)  // null = 全激活
 const dynastyCounts = computed(() => {
   const counts = {}
   for (const n of layoutNodes.value) {
@@ -195,23 +228,18 @@ const dynastyCounts = computed(() => {
 function onToggleDynasty(id) {
   // 状态机：null（全激活）→ 含该 id 的 Set → 不含该 id 的 Set → 全空（隐式视为"全激活"）
   if (activeDynasties.value == null) {
-    // 第一次点击：从全激活转成"除该 id 外全激活"
-    const s = new Set(dynastyLabels.map(d => d.id))
+    const s = new Set(dynastyLabels.map((d) => d.id))
     s.delete(id)
-    activeDynasties.value = s
+    store.setActiveDynasties(s)
     return
   }
   const s = new Set(activeDynasties.value)
-  if (s.has(id)) {
-    s.delete(id)
-  } else {
-    s.add(id)
-  }
-  // 全空 → 回到 null（全激活）
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
   if (s.size === 0 || s.size === dynastyLabels.length) {
-    activeDynasties.value = null
+    store.setActiveDynasties(null)
   } else {
-    activeDynasties.value = s
+    store.setActiveDynasties(s)
   }
 }
 
@@ -241,14 +269,44 @@ const emptyHint = computed(() => {
   return '请点击「刷新星图」或运行 precompute_layout.py 生成坐标'
 })
 const emptyAction = computed(() => {
-  if (error.value) return { label: '重试', handler: loadLayout }
+  if (error.value) return { label: '重试', handler: triggerLoadLayout }
   return null
 })
+
+// ============================================================
+// Event handlers（写入 store）
+// ============================================================
+function onSourceChange(e) {
+  selectedSource.value = e.target.value
+  // 切源时清空 selection（不同源的 node id 不可比）
+  store.clearSelected()
+  triggerLoadLayout()
+}
+
+function onCategoryChange(e) {
+  const v = e.target.value
+  store.setFilterCategory(v === '' ? null : Number(v))
+  // middleware 会 watch category 变化并自动调 loadLayout
+}
+
+function onDynastyInput(e) {
+  store.setFilterDynasty(e.target.value)
+  // middleware 会 watch dynasty 变化并 debounce 调 loadLayout
+}
+
+function onClearFilters() {
+  store.clearFilters()
+  triggerLoadLayout()  // 清除按钮立即触发
+}
+
+function triggerLoadLayout() {
+  loadLayout()
+}
 
 async function loadSources() {
   try {
     const res = await kgAPI.listSources()
-    const items = (res.sources || []).filter(s => s.enabled).map(s => ({ id: s.id, name: s.name }))
+    const items = (res.sources || []).filter((s) => s.enabled).map((s) => ({ id: s.id, name: s.name }))
     if (items.length) sources.value = items
   } catch (e) {
     console.warn('[Nebula] listSources failed:', e)
@@ -266,8 +324,9 @@ async function loadLayout() {
     if (filterCategory.value !== null) filters.category = filterCategory.value
     if (filterDynasty.value.trim()) filters.dynasty = filterDynasty.value.trim()
 
-    const res = await kgAPI.getLayout(selectedSource.value, null, 500, 0, filters)
-    layoutNodes.value = (res.nodes || []).map(n => ({
+    // 竞赛交付：节点上限取 systemHealth.demoNodeLimit（demo 模式默认 5000）
+    const res = await kgAPI.getLayout(selectedSource.value, null, nodeLimit.value, 0, filters)
+    layoutNodes.value = (res.nodes || []).map((n) => ({
       id: n.uri || n.id,
       name: n.name || n.label_chs || n.uri?.split('/').pop() || n.id,
       x: n.x,
@@ -279,7 +338,7 @@ async function loadLayout() {
       category: n.category ?? 2,
       birth_year: n.birth_year ?? null,
     }))
-    layoutEdges.value = (res.links || res.edges || []).map(e => ({
+    layoutEdges.value = (res.links || res.edges || []).map((e) => ({
       source: e.source,
       target: e.target,
       type: e.type || 'RELATED',
@@ -287,6 +346,9 @@ async function loadLayout() {
     }))
     totalInBbox.value = res.total_in_bbox || 0
     totalUnfiltered.value = res.total_in_bbox_unfiltered || layoutMeta.value?.node_count || 0
+
+    // 注意：NebulaCanvas watch props.nodes 会自动 buildScene + store.bumpLayout
+    // 这里不需要再调，middleware 会做 reconciliation
   } catch (e) {
     console.error('[Nebula] loadLayout error:', e)
     const msg = e.response?.data?.detail || e.message || ''
@@ -301,69 +363,36 @@ async function loadLayout() {
   }
 }
 
-function clearFilters() {
-  filterCategory.value = null
-  filterDynasty.value = ''
-  loadLayout()
-}
-
-// 筛选条件变化时自动重新加载
-watch([filterCategory, filterDynasty], () => {
-  // 输入框不触发自动 load（避免每按一键都重新查），只对 category dropdown 立即响应
-  if (filterCategory.value !== null) loadLayout()
-})
-
 function onSearchEnter() {
   if (!searchName.value.trim()) return
-  // 简单搜索：找到第一个匹配 name 的节点并选中
-  const target = layoutNodes.value.find(n =>
+  // 简单搜索：找到第一个匹配 name 的节点
+  const target = layoutNodes.value.find((n) =>
     n.name && n.name.includes(searchName.value.trim()),
   )
   if (target) {
-    onNodeClick(target)
+    // 写入 store：middleware 会自动 locate mesh + highlight + flyTo
+    store.setSelected(target.id, {
+      id: target.id,
+      name: target.name,
+      dynasty: target.dynasty,
+      region: target.region,
+      category: target.category,
+    })
   } else {
     const scope = layoutNodes.value.length
     const total = totalInBbox.value || scope
     const hint = filterCategory.value !== null || filterDynasty.value
       ? '当前筛选条件下'
       : `当前可见 ${scope} 颗 / 全图 ${total} 颗`
-    showSearchToast(`未找到「${searchName.value}」（${hint}）`)
-  }
-}
-
-function showSearchToast(msg) {
-  searchToast.value = msg
-  if (searchToastTimer) clearTimeout(searchToastTimer)
-  searchToastTimer = setTimeout(() => { searchToast.value = '' }, 3500)
-}
-
-function onNodeClick(node) {
-  selectedNode.value = node
-}
-
-function onBackgroundClick() {
-  selectedNode.value = null
-}
-
-function onNavigate(nodeData) {
-  // 子图节点点击 → 切到该人物 + 主画布相机飞向（M7 联动）
-  selectedNode.value = {
-    id: nodeData.id,
-    name: nodeData.name,
-    dynasty: nodeData.dynasty,
-    region: '',
-    category: nodeData.category ?? 2,
-  }
-  // 触发 3D 主画布相机飞向该节点
-  if (nebulaRef.value?.flyToNode) {
-    const ok = nebulaRef.value.flyToNode(nodeData.id)
-    if (!ok) {
-      console.warn(`[Nebula] flyToNode: node ${nodeData.id} 不在主画布节点集`)
-    }
+    store.showSearchToast(`未找到「${searchName.value}」（${hint}）`)
   }
 }
 
 onMounted(async () => {
+  // 竞赛交付：启动时先确认健康（避免 layout 在 PASS 之前就拉）
+  if (healthStore.overall === 'UNKNOWN') {
+    await healthStore.checkHealth()
+  }
   await loadSources()
   await loadLayout()
 })
@@ -372,6 +401,29 @@ onMounted(async () => {
 <style scoped>
 @import '../styles/xingye.css';
 
+.nebula-view {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Header 在 canvas 之上 */
+.nebula-header {
+  position: relative;
+  z-index: 20;
+  flex-shrink: 0;
+}
+
+/* 浮层 UI 在 canvas 之上 */
+.nebula-legend,
+.nebula-loading {
+  position: absolute;
+  z-index: 15;
+}
+
+/* Toast（北宋方志博物 · 纸卡 + 朱砂边） */
 .nebula-toast {
   position: fixed;
   top: 90px;
@@ -379,14 +431,15 @@ onMounted(async () => {
   transform: translateX(-50%);
   z-index: 60;
   padding: 10px 22px;
-  background: rgba(13, 13, 18, 0.92);
-  border: 1px solid var(--xingye-vermilion-seal);
-  border-radius: 4px;
-  color: var(--xingye-rice-main);
+  background: var(--paper-hi);
+  border: 1px solid var(--cinnabar-seal);
+  border-left: 3px solid var(--cinnabar-seal);
+  border-radius: 3px;
+  color: var(--ink-main);
   font-family: var(--xingye-font-display);
   font-size: 13px;
   letter-spacing: 0.15em;
-  box-shadow: 0 4px 18px rgba(194, 54, 42, 0.35);
+  box-shadow: 0 4px 18px rgba(168, 48, 42, 0.18);
   animation: nebula-toast-in 0.3s ease-out;
 }
 
@@ -398,15 +451,15 @@ onMounted(async () => {
 .nebula-legend-stats {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid var(--xingye-ink-light);
+  border-top: 1px solid var(--ink-wash);
   font-size: 11px;
-  color: var(--xingye-rice-dim);
+  color: var(--ink-pale);
   letter-spacing: 0.15em;
   font-family: var(--xingye-font-display);
 }
 
 .nebula-legend-filter {
-  color: var(--xingye-vermilion-main);
+  color: var(--cinnabar-seal);
   letter-spacing: 0.1em;
 }
 
@@ -417,7 +470,62 @@ onMounted(async () => {
 
 .nebula-btn-ghost {
   background: transparent;
-  border: 1px solid var(--xingye-vermilion-seal);
-  color: var(--xingye-vermilion-bright);
+  border: 1px solid var(--cinnabar-seal);
+  color: var(--cinnabar-bright);
+}
+
+/* 竞赛交付：SAFE MODE / DEGRADED 横幅（纸底 + 朱砂 / 金粉边） */
+.nebula-safe-banner,
+.nebula-warn-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  font-family: var(--xingye-font-display);
+  font-size: 13px;
+  letter-spacing: 0.15em;
+  border-radius: 3px;
+  margin: 8px 16px 0;
+  animation: nebula-banner-in 0.4s ease-out;
+}
+
+.nebula-safe-banner {
+  background: var(--cinnabar-faint, rgba(168, 48, 42, 0.08));
+  border: 1px solid var(--cinnabar-seal);
+  color: var(--cinnabar-deep);
+}
+
+.nebula-warn-banner {
+  background: var(--gold-faint, rgba(184, 148, 31, 0.12));
+  border: 1px solid var(--gold-main);
+  color: var(--gold-dim, #a0823a);
+}
+
+.nebula-safe-banner-icon,
+.nebula-warn-banner-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.nebula-safe-banner-icon {
+  background: var(--cinnabar-seal);
+  color: var(--paper-hi);
+}
+
+.nebula-warn-banner-icon {
+  background: var(--gold-main);
+  color: var(--ink-main);
+}
+
+@keyframes nebula-banner-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 </style>

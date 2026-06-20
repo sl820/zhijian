@@ -809,8 +809,8 @@ onUnmounted(() => {
 }
 .btn-action:hover:not(:disabled) { transform: translateY(-1px); }
 .btn-action:disabled { opacity: 0.5; cursor: not-allowed; }
-.btn-rag:hover:not(:disabled) { border-color: #1abc9c; color: #1abc9c; background: rgba(26, 188, 156, 0.08); }
-.btn-kg:hover:not(:disabled) { border-color: #e67e22; color: #e67e22; background: rgba(230, 126, 34, 0.08); }
+.btn-rag:hover:not(:disabled) { border-color: var(--secondary); color: var(--secondary); background: var(--secondary-bg); }
+.btn-kg:hover:not(:disabled) { border-color: var(--warning); color: var(--warning); background: var(--warning-bg); }
 
 /* ==================== Dialog ==================== */
 .dialog-loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: var(--space-xl); color: var(--text-muted); }

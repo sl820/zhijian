@@ -5,6 +5,7 @@ const routes = [
   { path: '/ocr', name: 'OCR', component: () => import('../views/OCRView.vue') },
   { path: '/knowledge', name: 'Knowledge', component: () => import('../views/KnowledgeView.vue') },
   { path: '/nebula', name: 'Nebula', component: () => import('../views/KnowledgeView.vue') },  // M6 别名
+  { path: '/narrative', name: 'Narrative', component: () => import('../views/NarrativeView.vue') },  // R9 研究叙事
   { path: '/qa', name: 'QA', component: () => import('../views/QAView.vue') },
 ]
 

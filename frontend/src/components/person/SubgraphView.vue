@@ -12,7 +12,7 @@
     </div>
     <div ref="chartRef" class="subgraph-chart" v-show="!loading"></div>
     <div v-if="loading" class="subgraph-loading">载录中...</div>
-    <div v-if="!loading && !nodeCount" class="subgraph-empty">无关联人物</div>
+    <div v-if="!loading && !nodeCount" class="subgraph-empty">暂无关系数据</div>
     <div v-if="!loading && linkCount" class="subgraph-legend">
       <span
         v-for="(count, type) in relationCounts"
@@ -46,14 +46,14 @@ import { PALETTE, CATEGORY_COLORS } from '../../constants/palette.js'
 // jiupu DB 实际只有 spouseOf / parentOf / childOf 三类；
 // 兼容未来扩展（兄弟/师徒/同僚）预留 default
 const RELATION_STYLE = {
-  spouseOf: { color: PALETTE.vermilion.main,  width: 2.0, opacity: 0.85, label: '夫妻' },
+  spouseOf: { color: PALETTE.vermilion.seal,  width: 2.0, opacity: 0.85, label: '夫妻' },
   parentOf: { color: PALETTE.gold.main,        width: 1.8, opacity: 0.80, label: '父→子' },
   childOf:  { color: PALETTE.family,           width: 1.8, opacity: 0.80, label: '子→父' },
-  siblingOf:{ color: PALETTE.rice.dim,         width: 1.4, opacity: 0.70, label: '兄弟' },
+  siblingOf:{ color: PALETTE.ink.pale,         width: 1.4, opacity: 0.70, label: '兄弟' },
   studentOf:{ color: PALETTE.official,         width: 1.4, opacity: 0.65, label: '师徒' },
   colleagueOf:{ color: PALETTE.ink.pale,       width: 1.2, opacity: 0.60, label: '同僚' },
 }
-const DEFAULT_REL_STYLE = { color: PALETTE.ink.light, width: 1.2, opacity: 0.7, label: '关联' }
+const DEFAULT_REL_STYLE = { color: PALETTE.ink.mid, width: 1.2, opacity: 0.7, label: '关联' }
 
 function relationStyle(type) {
   return RELATION_STYLE[type] || DEFAULT_REL_STYLE
@@ -101,20 +101,20 @@ function buildOption() {
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'item',
-      backgroundColor: 'rgba(13, 13, 18, 0.95)',
+      backgroundColor: PALETTE.ink.main,
       borderColor: PALETTE.vermilion.seal,
       borderWidth: 1,
-      textStyle: { color: PALETTE.rice.main, fontFamily: '"LXGW WenKai TC", serif' },
+      textStyle: { color: PALETTE.indigo.near, fontFamily: '"LXGW WenKai TC", serif' },
       formatter: (p) => {
         if (p.dataType === 'node') {
           return `<b style="color:${PALETTE.gold.main}">${p.data.name}</b><br/>` +
-                 `<span style="color:${PALETTE.rice.dim}">${p.data.dynasty || ''} ${p.data.role_of_family || ''}</span>`
+                 `<span style="color:${PALETTE.ink.pale}">${p.data.dynasty || ''} ${p.data.role_of_family || ''}</span>`
         }
         // 关系边 tooltip：显示关系类型 + 标签
         const st = relationStyle(p.data.type)
         return `<span style="color:${st.color}">━</span> ` +
-               `<span style="color:${PALETTE.rice.main}">${st.label}</span> ` +
-               `<span style="color:${PALETTE.rice.dim}">(${p.data.type || '关联'})</span>`
+               `<span style="color:${PALETTE.indigo.near}">${st.label}</span> ` +
+               `<span style="color:${PALETTE.ink.pale}">(${p.data.type || '关联'})</span>`
       },
     },
     animationDurationUpdate: 800,
@@ -135,7 +135,7 @@ function buildOption() {
         itemStyle: itemStyle({ data: n }),
         label: {
           show: true,
-          color: n.is_center ? PALETTE.gold.bright : PALETTE.rice.main,
+          color: n.is_center ? PALETTE.gold.bright : PALETTE.ink.main,
           fontFamily: '"LXGW WenKai TC", serif',
           fontSize: n.is_center ? 14 : 11,
           fontWeight: n.is_center ? 600 : 400,

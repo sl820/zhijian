@@ -11,99 +11,109 @@
 /* ==================== 加载霞鹜文楷（CDN，可换自托管） ==================== */
 @import url('https://chinese-fonts-cdn.deno.dev/packages/lxgwwenkai/dist/LXGWWenKaiTC-Regular/result.css');
 
-/* ==================== CSS 变量（星野主题） ==================== */
+/* ==================== CSS 变量（星野主题 — 靛蓝朱砂美学 · 1247 苏州石刻天文图式） ==================== */
+/* 旧 --xingye-* token 全部 alias 到统一 token，保证 .vue 兼容 */
 :root {
-  /* 背景 */
+  /* 背景：靛蓝夜底（远空深 → 中层 → 近层） */
   --xingye-indigo-deep: #0a0e1f;
   --xingye-indigo-mid: #131b35;
   --xingye-indigo-near: #1d2747;
 
-  /* 朱砂 */
+  /* 朱砂：节点主色 + 高亮 */
   --xingye-vermilion-deep: #8b2818;
   --xingye-vermilion-main: #c2362a;
   --xingye-vermilion-bright: #e84830;
   --xingye-vermilion-seal: #a82a1f;
 
-  /* 墨黑 */
+  /* 墨黑（连线 + 文字） */
   --xingye-ink-deep: #0d0d12;
   --xingye-ink-main: #1a1a24;
   --xingye-ink-light: #2a2a38;
   --xingye-ink-pale: #5a5a6e;
 
-  /* 金粉 */
+  /* 金粉（高亮 + 重要节点描边） */
   --xingye-gold-dim: #a89060;
   --xingye-gold-main: #d4b070;
   --xingye-gold-bright: #f0d090;
   --xingye-gold-pale: #e8d8b0;
 
-  /* 米白 */
+  /* 米白（星点 + 文字） */
   --xingye-rice-dim: #d8d4c4;
   --xingye-rice-main: #f0e8d4;
   --xingye-rice-bright: #faf6e8;
 
-  /* 字体 */
+  /* 字体（保留） */
   --xingye-font-display: "LXGW WenKai TC", "LXGW WenKai", "霞鹜文楷", "STKaiti", "KaiTi", serif;
   --xingye-font-serif: "Source Han Serif SC", "Noto Serif SC", "Songti SC", "STSong", serif;
   --xingye-font-sans: "PingFang SC", "Microsoft YaHei", sans-serif;
 
-  /* 阴影（朱砂发光 / 金粉光晕） */
-  --xingye-glow-vermilion: 0 0 12px rgba(194, 54, 42, 0.6);
-  --xingye-glow-vermilion-bright: 0 0 20px rgba(232, 72, 48, 0.8);
-  --xingye-glow-gold: 0 0 16px rgba(240, 208, 144, 0.5);
+  /* 阴影（朱砂 / 金粉） */
+  --xingye-glow-vermilion: 0 0 12px rgba(168, 48, 42, 0.4);
+  --xingye-glow-vermilion-bright: 0 0 20px rgba(200, 64, 48, 0.6);
+  --xingye-glow-gold: 0 0 16px rgba(184, 148, 31, 0.4);
 }
 
-/* ==================== 视图容器 ==================== */
+/* ==================== 视图容器（靛蓝夜底 · 1247 苏州石刻天文图式） ==================== */
 .nebula-view {
+  /* 局部 scope 覆写全局 paper/cinnabar token 为靛蓝/朱砂（不影响 OCR/QA 等其它 view） */
+  --paper: var(--xingye-indigo-deep);
+  --paper-deep: var(--xingye-indigo-mid);
+  --paper-hi: var(--xingye-indigo-near);
+  --bg-primary: var(--xingye-indigo-deep);
+  --bg-secondary: var(--xingye-indigo-mid);
+  --bg-card: var(--xingye-indigo-near);
+  --bg-dark: var(--xingye-indigo-mid);
+  --text-primary: var(--xingye-rice-bright);
+  --text-secondary: var(--xingye-rice-dim);
+  --text-muted: var(--xingye-rice-dim);
+  --text-inverse: var(--xingye-indigo-deep);
+  --border-light: var(--xingye-indigo-near);
+  --border-medium: var(--xingye-indigo-near);
+  --border-dark: var(--xingye-indigo-mid);
+  --accent: var(--xingye-vermilion-main);
+  --accent-light: var(--xingye-vermilion-bright);
+  --accent-dark: var(--xingye-vermilion-deep);
+  --accent-bg: rgba(194, 54, 42, 0.12);
+  --accent-bg-hover: rgba(232, 72, 48, 0.18);
+
   width: 100vw;
   height: 100vh;
   position: relative;
   overflow: hidden;
-  background: radial-gradient(ellipse at center,
-    var(--xingye-indigo-near) 0%,
-    var(--xingye-indigo-mid) 40%,
-    var(--xingye-indigo-deep) 100%);
-  color: var(--xingye-rice-main);
-  font-family: var(--xingye-font-display);
+  background:
+    radial-gradient(ellipse at 30% 20%, var(--xingye-indigo-near) 0%, var(--xingye-indigo-deep) 60%, #050810 100%);
+  color: var(--xingye-rice-bright);
+  font-family: var(--xingye-font-serif);
 }
 
-/* 卷轴边框装饰（左/右木纹） */
+/* 卷轴边框装饰（北宋方志博物 · 1px 暗墨竖线 + 朱砂顶端印章） */
 .nebula-view::before,
 .nebula-view::after {
   content: '';
   position: absolute;
-  top: 0;
+  top: 80px;
   bottom: 0;
-  width: 24px;
-  background:
-    linear-gradient(90deg,
-      rgba(139, 40, 24, 0.15) 0%,
-      rgba(232, 72, 48, 0.08) 50%,
-      transparent 100%);
+  width: 1px;
+  background: var(--ink-wash);
   pointer-events: none;
   z-index: 5;
+  opacity: 0.5;
 }
-.nebula-view::before { left: 0; }
-.nebula-view::after {
-  right: 0;
-  background:
-    linear-gradient(270deg,
-      rgba(139, 40, 24, 0.15) 0%,
-      rgba(232, 72, 48, 0.08) 50%,
-      transparent 100%);
-}
+.nebula-view::before { left: 24px; }
+.nebula-view::after { right: 24px; }
 
-/* ==================== 顶部栏（朱砂印章式标题） ==================== */
+/* ==================== 顶部栏（北宋方志博物 · 纸卡） ==================== */
 .nebula-header {
   position: relative;
-  z-index: 10;
+  z-index: 20;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 18px 56px;
-  background: linear-gradient(180deg,
-    rgba(10, 14, 31, 0.85) 0%,
-    rgba(10, 14, 31, 0) 100%);
-  pointer-events: none;
+  padding: 14px 32px;
+  background: var(--paper-hi);
+  border-bottom: 1px solid var(--ink-wash);
+  box-shadow: 0 1px 0 var(--paper-deep);
+  flex-shrink: 0;
 }
 .nebula-header > * { pointer-events: auto; }
 
@@ -115,11 +125,12 @@
 
 .nebula-title-text {
   font-family: var(--xingye-font-display);
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 500;
-  color: var(--xingye-rice-bright);
-  letter-spacing: 0.15em;
-  text-shadow: 0 0 12px rgba(240, 208, 144, 0.3);
+  color: var(--ink-main);
+  letter-spacing: 0.2em;
+  border-bottom: 1px solid var(--gold-main);
+  padding-bottom: 2px;
 }
 
 .nebula-title-seal {
@@ -127,76 +138,76 @@
   width: 38px;
   height: 38px;
   border: 2px solid var(--xingye-vermilion-seal);
-  border-radius: 4px;
-  color: var(--xingye-vermilion-bright);
+  border-radius: 3px;
+  color: var(--xingye-vermilion-seal);
   font-family: var(--xingye-font-display);
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 600;
   text-align: center;
   line-height: 34px;
-  background: rgba(168, 42, 31, 0.12);
-  box-shadow: var(--xingye-glow-vermilion);
+  background: var(--cinnabar-faint, rgba(168, 48, 42, 0.08));
   transform: rotate(-2deg);
 }
 
 .nebula-subtitle {
-  font-size: 13px;
-  color: var(--xingye-rice-dim);
-  letter-spacing: 0.3em;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-pale);
+  letter-spacing: 0.25em;
   margin-left: 8px;
-  opacity: 0.7;
+  opacity: 0.85;
 }
 
-/* ==================== 控制栏（搜索 + 筛选） ==================== */
+/* ==================== 控制栏（搜索 + 筛选 · 纸卡） ==================== */
 .nebula-controls {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .nebula-search-box {
   display: flex;
   align-items: center;
-  background: rgba(13, 13, 18, 0.6);
-  border: 1px solid var(--xingye-ink-light);
-  border-radius: 22px;
-  padding: 6px 14px;
-  backdrop-filter: blur(8px);
+  background: var(--paper);
+  border: 1px solid var(--ink-wash);
+  border-radius: 18px;
+  padding: 5px 14px;
+  transition: all 0.2s ease;
 }
 .nebula-search-box:focus-within {
   border-color: var(--xingye-vermilion-seal);
-  box-shadow: 0 0 8px rgba(194, 54, 42, 0.4);
+  box-shadow: 0 0 0 2px var(--cinnabar-faint, rgba(168, 48, 42, 0.12));
 }
 .nebula-search-input {
   background: transparent;
   border: none;
   outline: none;
-  color: var(--xingye-rice-main);
-  font-family: var(--xingye-font-display);
-  font-size: 14px;
-  letter-spacing: 0.08em;
+  color: var(--ink-main);
+  font-family: var(--xingye-font-serif);
+  font-size: 13px;
+  letter-spacing: 0.05em;
   width: 180px;
 }
 .nebula-search-input::placeholder {
-  color: var(--xingye-ink-pale);
-  letter-spacing: 0.15em;
+  color: var(--ink-pale);
+  letter-spacing: 0.1em;
 }
 
 .nebula-btn {
-  background: rgba(168, 42, 31, 0.18);
+  background: var(--paper-hi);
   border: 1px solid var(--xingye-vermilion-seal);
-  color: var(--xingye-vermilion-bright);
-  font-family: var(--xingye-font-display);
-  font-size: 14px;
-  padding: 6px 16px;
-  border-radius: 18px;
+  color: var(--xingye-vermilion-seal);
+  font-family: var(--xingye-font-serif);
+  font-size: 13px;
+  padding: 5px 14px;
+  border-radius: 14px;
   cursor: pointer;
   transition: all 0.2s ease;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.05em;
 }
 .nebula-btn:hover {
-  background: rgba(194, 54, 42, 0.3);
-  box-shadow: var(--xingye-glow-vermilion);
+  background: var(--cinnabar-faint, rgba(168, 48, 42, 0.08));
+  color: var(--xingye-vermilion-main);
 }
 .nebula-btn:disabled {
   opacity: 0.4;
@@ -204,30 +215,34 @@
 }
 
 /* ==================== Canvas 容器 ==================== */
+/* 容器定位由 NebulaCanvas.vue 自身控制（flex item 填满父容器） */
 .nebula-canvas-wrapper {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
+  position: relative;
+  flex: 1 1 0%;
+  min-height: 0;
 }
 
-/* ==================== 图例（左下角） ==================== */
+/* ==================== 图例（左下角 · 纸卡） ==================== */
 .nebula-legend {
   position: absolute;
   bottom: 24px;
   left: 56px;
   z-index: 10;
-  background: rgba(13, 13, 18, 0.7);
-  border: 1px solid var(--xingye-ink-light);
-  border-radius: 6px;
+  background: rgba(251, 245, 225, 0.92);
+  border: 1px solid var(--ink-wash);
+  border-left: 3px solid var(--xingye-vermilion-seal);
+  border-radius: 4px;
   padding: 12px 16px;
   backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(28, 28, 28, 0.08);
 }
 .nebula-legend-title {
   font-family: var(--xingye-font-display);
   font-size: 13px;
-  color: var(--xingye-gold-main);
+  color: var(--ink-main);
   letter-spacing: 0.2em;
   margin-bottom: 8px;
+  font-weight: 500;
 }
 .nebula-legend-items {
   display: flex;
@@ -239,41 +254,43 @@
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: var(--xingye-rice-dim);
-  font-family: var(--xingye-font-display);
+  color: var(--ink-mid);
+  font-family: var(--xingye-font-serif);
 }
 .nebula-legend-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  box-shadow: 0 0 4px currentColor;
+  box-shadow: 0 0 2px rgba(28, 28, 28, 0.2);
 }
 
-/* ==================== Tooltip ==================== */
+/* ==================== Tooltip（纸卡） ==================== */
 .nebula-tooltip {
   position: absolute;
   pointer-events: none;
   z-index: 20;
-  background: rgba(13, 13, 18, 0.92);
+  background: var(--paper-hi);
   border: 1px solid var(--xingye-vermilion-seal);
-  border-radius: 4px;
-  padding: 8px 12px;
-  font-family: var(--xingye-font-display);
-  color: var(--xingye-rice-bright);
-  font-size: 14px;
-  letter-spacing: 0.08em;
-  box-shadow: var(--xingye-glow-vermilion);
+  border-left: 3px solid var(--xingye-vermilion-seal);
+  border-radius: 3px;
+  padding: 6px 12px;
+  font-family: var(--xingye-font-serif);
+  color: var(--ink-main);
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  box-shadow: 0 4px 12px rgba(28, 28, 28, 0.12);
   white-space: nowrap;
   transform: translate(-50%, -100%) translateY(-8px);
 }
 .nebula-tooltip-dynasty {
   font-size: 11px;
-  color: var(--xingye-gold-main);
+  color: var(--ink-pale);
   margin-top: 2px;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.15em;
+  font-family: 'JetBrains Mono', monospace;
 }
 
-/* ==================== 加载状态 ==================== */
+/* ==================== 加载状态（纸底 + 朱砂印章） ==================== */
 .nebula-loading {
   position: absolute;
   inset: 0;
@@ -282,34 +299,33 @@
   align-items: center;
   justify-content: center;
   z-index: 30;
-  background: rgba(10, 14, 31, 0.85);
+  background: rgba(244, 235, 208, 0.92);
   backdrop-filter: blur(4px);
 }
 .nebula-loading-seal {
   width: 60px;
   height: 60px;
   border: 2px solid var(--xingye-vermilion-seal);
-  border-radius: 4px;
+  border-radius: 3px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--xingye-vermilion-bright);
+  color: var(--xingye-vermilion-seal);
   font-family: var(--xingye-font-display);
-  font-size: 24px;
-  background: rgba(168, 42, 31, 0.1);
-  box-shadow: var(--xingye-glow-vermilion);
+  font-size: 26px;
+  background: var(--cinnabar-faint, rgba(168, 48, 42, 0.08));
   animation: nebula-loading-pulse 2s ease-in-out infinite;
 }
 .nebula-loading-text {
   margin-top: 18px;
-  font-family: var(--xingye-font-display);
+  font-family: var(--xingye-font-serif);
   font-size: 14px;
-  color: var(--xingye-rice-dim);
+  color: var(--ink-mid);
   letter-spacing: 0.3em;
 }
 @keyframes nebula-loading-pulse {
-  0%, 100% { box-shadow: 0 0 12px rgba(194, 54, 42, 0.4); }
-  50% { box-shadow: 0 0 28px rgba(232, 72, 48, 0.9); }
+  0%, 100% { box-shadow: 0 0 8px rgba(168, 48, 42, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(168, 48, 42, 0.7); }
 }
 
 /* ==================== 空状态 ==================== */
@@ -325,13 +341,14 @@
 .nebula-empty-title {
   font-family: var(--xingye-font-display);
   font-size: 24px;
-  color: var(--xingye-rice-main);
+  color: var(--ink-main);
   letter-spacing: 0.4em;
   margin-bottom: 12px;
 }
 .nebula-empty-hint {
   font-size: 13px;
-  color: var(--xingye-ink-pale);
+  color: var(--ink-pale);
   letter-spacing: 0.15em;
   margin-bottom: 24px;
+  font-family: var(--xingye-font-serif);
 }

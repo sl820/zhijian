@@ -7,49 +7,73 @@
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import url('//fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&display=swap');
 
-/* ==================== CSS 变量 - 古籍书房色系 ==================== */
+/* ==================== CSS 变量 - 北宋方志博物（单栈） ==================== */
 :root {
-  /* ==================== 背景 - 纸张色调 ==================== */
-  --bg-primary: #f4efe6;
-  --bg-secondary: #eae4d6;
-  --bg-card: #faf8f3;
+  /* ==================== 主 token：纸 / 墨 / 朱砂 / 青瓷 / 金 ==================== */
+  --paper: #f4ebd0;
+  --paper-deep: #e8dcb8;
+  --paper-hi: #fbf5e1;
+
+  --ink-main: #1c1c1c;
+  --ink-mid: #3a3a36;
+  --ink-pale: #7a766b;
+  --ink-wash: #b8b1a0;
+
+  --cinnabar-seal: #a8302a;
+  --cinnabar-deep: #7a2018;
+  --cinnabar-bright: #c84030;
+  --cinnabar-faint: rgba(168, 48, 42, 0.12);
+
+  --celadon-main: #7d9a92;
+  --celadon-light: #a3bdb4;
+  --celadon-faint: rgba(125, 154, 146, 0.15);
+
+  --gold-main: #b8941f;
+  --gold-dim: #a0823a;
+  --gold-bright: #d4a830;
+  --gold-faint: rgba(184, 148, 31, 0.18);
+
+  /* ==================== 背景（alias） ==================== */
+  --bg-primary: var(--paper);
+  --bg-secondary: var(--paper-deep);
+  --bg-card: var(--paper-hi);
   --bg-elevated: #ffffff;
-  --bg-dark: #e8e0d0;
+  --bg-dark: var(--paper-deep);
 
-  /* ==================== 墨色 - 深邃但不刺眼 ==================== */
-  --text-primary: #1a1a1a;
-  --text-secondary: #4a4a4a;
-  --text-muted: #8a8a8a;
-  --text-inverse: #faf8f3;
+  /* ==================== 墨色（alias） ==================== */
+  --text-primary: var(--ink-main);
+  --text-secondary: var(--ink-mid);
+  --text-muted: var(--ink-pale);
+  --text-inverse: var(--paper-hi);
 
-  /* ==================== 强调 - 朱砂红（印章色） ==================== */
-  --accent: #b54a32;
-  --accent-light: #c9634a;
-  --accent-dark: #9a3a28;
-  --accent-bg: rgba(181, 74, 50, 0.08);
-  --accent-bg-hover: rgba(181, 74, 50, 0.12);
+  /* ==================== 强调 - 朱砂（alias） ==================== */
+  --accent: var(--cinnabar-seal);
+  --accent-light: var(--cinnabar-bright);
+  --accent-dark: var(--cinnabar-deep);
+  --accent-bg: var(--cinnabar-faint);
+  --accent-bg-hover: rgba(168, 48, 42, 0.18);
 
-  /* ==================== 次要 - 青瓷（玉色） ==================== */
-  --secondary: #6b8f8a;
-  --secondary-light: #8aab9f;
+  /* ==================== 次要 - 青瓷（alias） ==================== */
+  --secondary: var(--celadon-main);
+  --secondary-light: var(--celadon-light);
   --secondary-dark: #557572;
-  --secondary-bg: rgba(107, 143, 138, 0.08);
+  --secondary-bg: var(--celadon-faint);
 
   /* ==================== 功能色 - 温润 ==================== */
   --success: #5a8a6a;
   --success-bg: rgba(90, 138, 106, 0.1);
-  --warning: #b8863a;
-  --warning-bg: rgba(184, 134, 58, 0.1);
-  --danger: #a04040;
-  --danger-bg: rgba(160, 64, 64, 0.1);
+  --warning: var(--gold-main);
+  --warning-bg: var(--gold-faint);
+  --danger: var(--cinnabar-seal);
+  --danger-bg: var(--cinnabar-faint);
   --info: #5a7a8a;
   --info-bg: rgba(90, 122, 138, 0.1);
 
-  /* ==================== 边框 - 温暖边界 ==================== */
+  /* ==================== 边框（alias） ==================== */
   --border-light: #e5dfd4;
-  --border-medium: #d4cbc0;
-  --border-dark: #b8af9f;
-  --border-accent: rgba(181, 74, 50, 0.3);
+  --border-medium: var(--ink-wash);
+  --border-dark: var(--ink-pale);
+  --border-accent: var(--cinnabar-faint);
 
   /* ==================== 阴影 - 温暖柔和 ==================== */
   --shadow-xs: 0 1px 2px rgba(30, 25, 20, 0.04);
@@ -69,15 +93,15 @@
   --space-4xl: 96px;
 
   /* ==================== 圆角 ==================== */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 10px;
   --radius-full: 9999px;
 
   /* ==================== 字体 ==================== */
-  --font-display: 'ZCOOL XiaoWei', 'STKaiti', 'KaiTi', serif;
-  --font-serif: 'Noto Serif SC', 'SimSun', 'STSong', serif;
+  --font-display: 'ZCOOL XiaoWei', 'LXGW WenKai TC', 'STKaiti', 'KaiTi', serif;
+  --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', serif;
   --font-sans: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
 

@@ -16,7 +16,7 @@
           <!-- 主导航 -->
           <nav class="main-nav">
             <router-link
-              v-for="item in navItems"
+              v-for="item in visibleNavItems"
               :key="item.path"
               :to="item.path"
               class="nav-link"
@@ -29,6 +29,12 @@
 
           <!-- 状态 -->
           <div class="header-right">
+            <span v-if="healthSafeMode" class="status-safe-badge" title="系统处于降级模式">
+              SAFE MODE
+            </span>
+            <span v-else-if="healthDegraded" class="status-warn-badge" title="部分功能降级中">
+              DEGRADED
+            </span>
             <button class="status-badge" :class="apiStatus" @click="checkApiStatus">
               <span class="status-dot"></span>
               <span class="status-label">{{ statusLabel }}</span>
@@ -39,11 +45,13 @@
 
       <!-- 主内容 -->
       <main class="app-main">
-        <router-view v-slot="{ Component }">
-          <transition name="page" mode="out-in">
-            <component :is="Component" />
-          </transition>
-        </router-view>
+        <AppErrorBoundary>
+          <router-view v-slot="{ Component }">
+            <transition name="page" mode="out-in">
+              <component :is="Component" />
+            </transition>
+          </router-view>
+        </AppErrorBoundary>
       </main>
     </div>
 
@@ -77,10 +85,13 @@ import { computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useAppStore } from '@/stores/app'
+import { useSystemHealthStore } from '@/stores/systemHealth'
 
 const route = useRoute()
 const appStore = useAppStore()
+const healthStore = useSystemHealthStore()
 const { apiStatus, messages, globalLoading, loadingMessage } = storeToRefs(appStore)
+const { safeMode: healthSafeMode, isDegraded: healthDegraded, demoMode: healthDemoMode } = storeToRefs(healthStore)
 
 const activeRoute = computed(() => route.path)
 
@@ -88,24 +99,42 @@ const navItems = [
   {
     path: '/',
     name: '首页',
+    ocr: false,
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>'
   },
   {
     path: '/ocr',
     name: 'OCR 古籍识别',
+    ocr: true,
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>'
   },
   {
     path: '/knowledge',
     name: '知识图谱',
+    ocr: false,
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="5" r="2"/><line x1="12" y1="9" x2="12" y2="5"/></svg>'
+  },
+  {
+    path: '/narrative',
+    name: '研究叙事',
+    ocr: false,
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M4 4h12a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4V4z"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="13" y2="14"/></svg>'
   },
   {
     path: '/qa',
     name: '智能问答',
+    ocr: false,
     icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="16" height="16"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'
   }
 ]
+
+// 竞赛交付：demo_mode 时隐藏 OCR 入口
+const visibleNavItems = computed(() => {
+  return navItems.filter((item) => {
+    if (item.ocr && healthDemoMode.value) return false
+    return true
+  })
+})
 
 const statusLabel = computed(() => {
   switch (apiStatus.value) {
@@ -137,7 +166,12 @@ let healthInterval = null
 
 onMounted(async () => {
   await appStore.checkHealth()
-  healthInterval = setInterval(() => appStore.checkHealth(), 30000)
+  // 启动时拉一次系统健康（PASS/WARN/FAIL）
+  await healthStore.checkHealth()
+  healthInterval = setInterval(() => {
+    appStore.checkHealth()
+    healthStore.checkHealth()
+  }, 30000)
 })
 
 onUnmounted(() => {
@@ -175,7 +209,7 @@ onUnmounted(() => {
   gap: var(--space-xl);
 }
 
-/* Logo - 印章风格 */
+/* Logo - 北宋方志博物 · 朱砂印章方块 */
 .logo {
   display: flex;
   align-items: center;
@@ -192,17 +226,19 @@ onUnmounted(() => {
 .logo-mark {
   width: 38px;
   height: 38px;
-  background: var(--accent);
-  color: var(--text-inverse);
+  background: var(--cinnabar-faint);
+  color: var(--cinnabar-seal);
+  border: 2px solid var(--cinnabar-seal);
   font-family: var(--font-display);
   font-size: 20px;
-  font-weight: 400;
+  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  border-radius: 3px;
+  box-shadow: 0 1px 0 var(--cinnabar-seal);
   letter-spacing: 0;
+  transform: rotate(-2deg);
 }
 
 .logo-text {
@@ -214,16 +250,19 @@ onUnmounted(() => {
 .logo-name {
   font-family: var(--font-display);
   font-size: 18px;
-  color: var(--text-primary);
+  color: var(--ink-main);
   line-height: 1.2;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.2em;
+  border-bottom: 1px solid var(--gold-main);
+  padding-bottom: 1px;
 }
 
 .logo-tagline {
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--ink-pale);
   line-height: 1.2;
   font-family: var(--font-serif);
+  margin-top: 2px;
 }
 
 /* 主导航 */
@@ -321,6 +360,32 @@ onUnmounted(() => {
 .status-badge.checking .status-dot {
   background: var(--warning);
   animation: pulse 1s ease infinite;
+}
+
+/* SAFE MODE / DEGRADED 徽章（竞赛交付） */
+.status-safe-badge,
+.status-warn-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  font-family: var(--font-display, 'LXGW WenKai TC', serif);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  border-radius: var(--radius-full, 999px);
+  margin-right: 6px;
+}
+
+.status-safe-badge {
+  background: rgba(194, 54, 42, 0.18);
+  color: var(--danger, #c2362a);
+  border: 1px solid var(--danger, #c2362a);
+  animation: pulse 1.5s ease infinite;
+}
+
+.status-warn-badge {
+  background: rgba(196, 162, 84, 0.18);
+  color: #c4a254;
+  border: 1px solid #c4a254;
 }
 
 .status-label {

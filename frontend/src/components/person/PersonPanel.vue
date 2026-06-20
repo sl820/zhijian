@@ -1,16 +1,18 @@
 <!--
-  志鉴·星野图考 人物详情面板（M7 完整版）
+  志鉴·星野图考 人物详情面板（v2 - 接入 nebula store）
 
-  - 名片（朱砂印章式）
-  - 1-2 跳局部子图
-  - 跨源证据列表
-  - RAG 入口（面板内嵌问答）
+  改造（2026-06-17）：
+    - 删除 person prop 和 close/navigate emit
+    - 改用 useNebulaStore 读 selectedNodeData
+    - watch 源改为 store.selectedNodeId（id 变化触发重新拉详情）
+    - close 按钮直接调 store.clearSelected
+    - 子图节点点击 → store.setSelected
 -->
 <template>
-  <aside class="person-panel" @click.stop>
+  <aside v-if="store.selectedNodeData" class="person-panel" @click.stop>
     <header class="panel-header">
       <h2 class="panel-title">人物志</h2>
-      <button class="panel-close" @click="$emit('close')" aria-label="关闭">
+      <button class="panel-close" @click="onClose" aria-label="关闭">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
           <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
         </svg>
@@ -25,8 +27,8 @@
       <!-- 名片 -->
       <PersonCard
         :name="displayName"
-        :category="detail.person_type ?? person.category ?? null"
-        :dynasty="detail.dynasty || person.dynasty"
+        :category="detail.person_type ?? store.selectedNodeData.category ?? null"
+        :dynasty="detail.dynasty || store.selectedNodeData.dynasty"
         :years="detail.years"
         :region="detail.region"
         :courtesy_name="detail.courtesy_name"
@@ -40,7 +42,7 @@
         :nodes="subgraph.nodes"
         :links="subgraph.links"
         :loading="loadingSubgraph"
-        :centerUri="person.id"
+        :centerUri="store.selectedNodeData.id"
         @node-click="onSubgraphNodeClick"
       />
 
@@ -90,11 +92,9 @@ import PersonCard from './PersonCard.vue'
 import SubgraphView from './SubgraphView.vue'
 import EvidenceList from './EvidenceList.vue'
 import { kgAPI } from '../../services/api.js'
+import { useNebulaStore } from '../../stores/nebula.js'
 
-const props = defineProps({
-  person: { type: Object, required: true },
-})
-const emit = defineEmits(['close', 'navigate'])
+const store = useNebulaStore()
 
 const loadingDetail = ref(false)
 const loadingSubgraph = ref(false)
@@ -109,67 +109,89 @@ const ragAnswer = ref('')
 const ragSources = ref([])
 
 const displayName = computed(() => {
-  return props.person.name || props.person.id?.split('/').pop() || '未知'
+  const p = store.selectedNodeData
+  if (!p) return ''
+  return p.name || p.id?.split('/').pop() || '未知'
 })
 
-watch(() => props.person, async (p) => {
-  if (!p) return
-  ragAnswer.value = ''
-  ragQuery.value = ''
-  detail.value = {}
-  subgraph.value = { nodes: [], links: [] }
-  evidence.value = []
-
-  // 1. 详情 + 子图 + 证据 并发拉
-  loadingDetail.value = true
-  loadingSubgraph.value = true
-  loadingEvidence.value = true
-
-  try {
-    // 详情（合并多源）— 试 jiapu / memory
-    try {
-      const res = await kgAPI.getPerson(p.id, 1, 'jiapu')
-      detail.value = { ...res.person, source: 'jiapu' }
-    } catch (e) {
-      try {
-        const res = await kgAPI.getPerson(displayName.value)
-        detail.value = { ...res.person, source: 'memory' }
-      } catch (_) {}
+/**
+ * 关键修复：watch 源改为 store.selectedNodeId（id 字符串）
+ * - 旧版 watch props.person：layout 切换时 person 引用变孤儿，watch 不触发
+ * - 新版 watch id：id 变化时一定触发（包括 layout 切换后 middleware 清理的情况）
+ */
+watch(
+  () => store.selectedNodeId,
+  async (id) => {
+    if (!id) {
+      // 清空数据（panel 即将被 v-if 隐藏）
+      detail.value = {}
+      subgraph.value = { nodes: [], links: [] }
+      evidence.value = []
+      ragAnswer.value = ''
+      ragQuery.value = ''
+      return
     }
 
-    // 子图
+    // 重置数据
+    ragAnswer.value = ''
+    ragQuery.value = ''
+    detail.value = {}
+    subgraph.value = { nodes: [], links: [] }
+    evidence.value = []
+
+    loadingDetail.value = true
+    loadingSubgraph.value = true
+    loadingEvidence.value = true
+
+    const p = store.selectedNodeData
+    if (!p) return
+
+    // 1. 详情（合并多源）— 试 jiapu / memory
     try {
-      const sub = await kgAPI.getSubgraph(p.id, 'jiapu', 2, 80)
+      try {
+        const res = await kgAPI.getPerson(id, 1, 'jiapu')
+        detail.value = { ...res.person, source: 'jiapu' }
+      } catch (e) {
+        try {
+          const res = await kgAPI.getPerson(displayName.value)
+          detail.value = { ...res.person, source: 'memory' }
+        } catch (_) {}
+      }
+    } catch (e) {
+      console.warn('[M7] detail load failed:', e)
+    }
+
+    // 2. 子图
+    try {
+      const sub = await kgAPI.getSubgraph(id, 'jiapu', 2, 80)
       subgraph.value = { nodes: sub.nodes, links: sub.links }
     } catch (e) {
       console.warn('[M7] subgraph load failed:', e)
     }
     loadingSubgraph.value = false
 
-    // 证据
+    // 3. 证据
     try {
-      const ev = await kgAPI.getEvidence(p.id, displayName.value)
+      const ev = await kgAPI.getEvidence(id, displayName.value)
       evidence.value = ev.evidence || []
     } catch (e) {
       console.warn('[M7] evidence load failed:', e)
     }
     loadingEvidence.value = false
     loadingDetail.value = false
-  } catch (e) {
-    console.error('[M7] detail load failed:', e)
-    loadingDetail.value = false
-    loadingSubgraph.value = false
-    loadingEvidence.value = false
-  }
-}, { immediate: true })
+  },
+  { immediate: true },
+)
 
 async function askRAG() {
   const q = ragQuery.value.trim()
   if (!q) return
+  const p = store.selectedNodeData
+  if (!p) return
   loadingRAG.value = true
   ragAnswer.value = ''
   try {
-    const res = await kgAPI.personRAG(props.person.id, q, displayName.value, 3)
+    const res = await kgAPI.personRAG(p.id, q, displayName.value, 3)
     ragAnswer.value = res.answer || '（无答案）'
     ragSources.value = res.sources || []
   } catch (e) {
@@ -179,10 +201,18 @@ async function askRAG() {
   }
 }
 
+function onClose() {
+  store.clearSelected()
+}
+
 function onSubgraphNodeClick(nodeData) {
-  // 子图节点点击 → 主图飞向（M6 GSAP 已经在 NebulaCanvas 里实现）
-  // 这里只 emit 事件，让 KnowledgeView 决定是否切换 selectedNode
-  emit('navigate', nodeData)
+  // 子图节点点击 → 写入 store（middleware 会自动 flyTo + highlight）
+  store.setSelected(nodeData.id, {
+    id: nodeData.id,
+    name: nodeData.name,
+    dynasty: nodeData.dynasty,
+    category: nodeData.category ?? 2,
+  })
 }
 </script>
 
@@ -217,7 +247,7 @@ function onSubgraphNodeClick(nodeData) {
 .panel-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   padding: 14px 20px;
   border-bottom: 1px solid var(--xingye-ink-light);
   background: rgba(168, 42, 31, 0.12);
@@ -359,7 +389,7 @@ function onSubgraphNodeClick(nodeData) {
   color: var(--xingye-gold-pale);
   background: rgba(168, 144, 96, 0.18);
   padding: 2px 6px;
-  border-radius: 2px;
+  border-radius: 3px;
   letter-spacing: 0.1em;
 }
 </style>

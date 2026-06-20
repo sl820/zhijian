@@ -13,10 +13,7 @@ const apiClient = axios.create({
 })
 
 apiClient.interceptors.request.use(
-  (config) => {
-    console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`)
-    return config
-  },
+  (config) => config,
   (error) => Promise.reject(error)
 )
 
@@ -33,6 +30,25 @@ apiClient.interceptors.response.use(
 
 export const healthAPI = {
   check: () => apiClient.get('/health')
+}
+
+// ==================== 系统健康 Gate（竞赛交付）====================
+// 启动时拉一次 → 决定 SAFE MODE / 节点上限 / OCR 入口可见性
+export const systemHealthAPI = {
+  check: () => apiClient.get('/system/health')
+}
+
+// ==================== R9 研究引擎 / 一键评委包 ====================
+export const researchAPI = {
+  getInsights: () => apiClient.get('/research/insights'),
+  getInsight: (kind) => apiClient.get(`/research/insights/${kind}`),
+  getPersonNarrative: (uri) => apiClient.get(`/research/person/${encodeURIComponent(uri)}/narrative`),
+  getHealth: () => apiClient.get('/research/health'),
+}
+
+export const demoAPI = {
+  getJuryPack: () => apiClient.get('/demo/jury_pack'),
+  getSystemSummary: () => apiClient.get('/demo/system_summary'),
 }
 
 // ==================== OCR 古籍识别模块 ====================
@@ -122,8 +138,8 @@ export const kgAPI = {
   },
 
   // 星云图谱（M6）
-  getLayout: (source = 'jiapu', bbox = null, limit = 500, offset = 0) => {
-    return apiClient.get('/kg/layout', { params: { source, bbox, limit, offset } })
+  getLayout: (source = 'jiapu', bbox = null, limit = 500, offset = 0, filters = {}) => {
+    return apiClient.get('/kg/layout', { params: { source, bbox, limit, offset, ...filters } })
   },
 
   getLayoutMetadata: (source = 'jiapu') => {
@@ -154,6 +170,9 @@ export const kgAPI = {
 
 export default {
   health: healthAPI,
+  systemHealth: systemHealthAPI,
+  research: researchAPI,
+  demo: demoAPI,
   rag: ragAPI,
   kg: kgAPI
 }

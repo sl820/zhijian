@@ -51,6 +51,37 @@
             </div>
             <div class="msg-body">
               <div class="msg-content" v-html="renderMarkdown(msg.content, msg.role === 'assistant' ? lastQuestion : '')"></div>
+
+              <!-- R9 证据链 + fallback 徽章 -->
+              <div v-if="msg.role === 'assistant' && (msg.evidence?.length || msg.fallback || msg.method)" class="msg-evidence">
+                <div class="msg-evidence-head">
+                  <span v-if="msg.fallback" class="evidence-badge evidence-badge--fallback" :title="msg.fallbackReason || '降级响应'">
+                    FALLBACK
+                  </span>
+                  <span v-else class="evidence-badge evidence-badge--verified">
+                    EVIDENCE
+                  </span>
+                  <span v-if="msg.method" class="evidence-method" :title="msg.method">
+                    {{ truncateMethod(msg.method) }}
+                  </span>
+                </div>
+                <div v-if="msg.evidence?.length" class="evidence-chips">
+                  <span
+                    v-for="(ev, i) in msg.evidence.slice(0, 6)"
+                    :key="i"
+                    class="evidence-chip"
+                    :class="['evidence-chip--' + (ev.source || 'computed')]"
+                    :title="ev.snippet || ev.title || ev.source"
+                  >
+                    <span class="evidence-chip__src">{{ sourceLabel(ev.source) }}</span>
+                    <span v-if="ev.confidence != null" class="evidence-chip__conf">{{ Math.round((ev.confidence || 0) * 100) }}%</span>
+                  </span>
+                  <span v-if="msg.evidence.length > 6" class="evidence-chip evidence-chip--more">
+                    +{{ msg.evidence.length - 6 }}
+                  </span>
+                </div>
+              </div>
+
               <div class="msg-meta">
                 <span class="msg-time">{{ msg.time }}</span>
                 <button v-if="msg.role === 'user'" class="btn-copy" @click="copyMessage(msg.content)" title="复制">
@@ -299,18 +330,35 @@ async function sendQuestion() {
 
   try {
     const res = await ragAPI.ask(q)
+    // R9: 统一证据链 EvidenceResponse 结构
+    const evidence = res.evidence || []
     messages.value.push({
       role: 'assistant',
       content: res.answer || '抱歉，未能回答此问题。',
-      time: formatTime(new Date())
+      time: formatTime(new Date()),
+      evidence,
+      method: res.method || 'rag + bge + qwen2.5',
+      fallback: !!res.fallback,
+      fallbackReason: res.fallback_reason || null,
     })
-    sources.value = res.sources || []
+    // 兼容旧 sources 侧栏：从 evidence 映射回 {text, source, score}
+    sources.value = evidence.length
+      ? evidence.map((e) => ({
+          text: e.snippet || e.title || '',
+          source: e.source || 'unknown',
+          score: typeof e.confidence === 'number' ? e.confidence : 0,
+        }))
+      : (res.sources || [])
   } catch (error) {
     console.error('RAG问答失败', error)
     messages.value.push({
       role: 'assistant',
       content: `问答服务暂时不可用（${error.message || 'API 请求失败'}）。\n\n请检查：\n1. 后台服务是否已启动\n2. Ollama + Qwen2.5-3B 是否正常运行\n3. Milvus 向量数据库是否在线`,
-      time: formatTime(new Date())
+      time: formatTime(new Date()),
+      evidence: [],
+      method: 'client_error',
+      fallback: true,
+      fallbackReason: error.message || 'network_error',
     })
     ElMessage.error('问答服务暂时不可用')
   } finally {
@@ -472,6 +520,26 @@ function extractKeywords(query) {
     .map(s => s.slice(1, -1))
   const all = [...new Set([...qm, ...cn])]
   return all.slice(0, 8)
+}
+
+// R9 证据链 helpers
+const EVIDENCE_SOURCE_LABELS = {
+  jiapu: '家谱',
+  cbdb: 'CBDB',
+  kg: '知识图谱',
+  rag: 'RAG',
+  layout: '布局',
+  computed: '计算',
+  fallback: '兜底',
+}
+
+function sourceLabel(s) {
+  return EVIDENCE_SOURCE_LABELS[s] || s || '未知'
+}
+
+function truncateMethod(m) {
+  if (!m) return ''
+  return m.length > 36 ? m.slice(0, 34) + '…' : m
 }
 </script>
 
@@ -1153,6 +1221,92 @@ function extractKeywords(query) {
   border-radius: 2px;
   font-weight: 500;
 }
+
+/* ==================== R9 证据链 + Fallback 徽章 ==================== */
+.msg-evidence {
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.02);
+  border-left: 2px solid var(--border-medium);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.msg-evidence-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.evidence-badge {
+  display: inline-block;
+  font-family: var(--font-display, 'ZCOOL XiaoWei', serif);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  padding: 2px 8px;
+  border-radius: 2px;
+  font-weight: 500;
+}
+
+.evidence-badge--verified {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid var(--success);
+}
+
+.evidence-badge--fallback {
+  background: var(--warning-bg);
+  color: var(--gold-dim);
+  border: 1px solid var(--gold-main);
+}
+
+.evidence-method {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+
+.evidence-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.evidence-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 2px;
+  background: rgba(181, 74, 50, 0.08);
+  color: var(--accent);
+  letter-spacing: 0.05em;
+}
+
+.evidence-chip__src {
+  font-family: var(--font-display, 'ZCOOL XiaoWei', serif);
+  font-weight: 500;
+}
+
+.evidence-chip__conf {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.evidence-chip--jiapu { background: var(--accent-bg); color: var(--accent); }
+.evidence-chip--cbdb { background: var(--gold-faint); color: var(--gold-dim); }
+.evidence-chip--kg { background: var(--success-bg); color: var(--success); }
+.evidence-chip--rag { background: var(--warning-bg); color: var(--gold-dim); }
+.evidence-chip--layout { background: var(--secondary-bg); color: var(--secondary); }
+.evidence-chip--computed { background: var(--secondary-bg); color: var(--secondary); }
+.evidence-chip--fallback { background: var(--border-light); color: var(--text-muted); }
+.evidence-chip--more { background: transparent; color: var(--text-muted); border: 1px dashed var(--border-medium); }
 
 /* ==================== 响应式 ==================== */
 @media (max-width: 1100px) {

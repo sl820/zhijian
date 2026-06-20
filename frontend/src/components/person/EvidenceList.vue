@@ -50,16 +50,16 @@ const TYPE_LABELS = {
 
 const SOURCE_COLORS = {
   jiapu: PALETTE.vermilion.bright,
-  base: PALETTE.family || '#5b9b9c',
+  base: PALETTE.family,
   memory: PALETTE.gold.main,
-  rag: PALETTE.female || '#b85878',
+  rag: PALETTE.female,
   gufang: PALETTE.official,
-  dimingzhi: '#8aaa8a',
-  gmwx: '#a89060',
+  dimingzhi: PALETTE.family,
+  gmwx: PALETTE.gold.dim,
 }
 
 function sourceColor(src) {
-  return SOURCE_COLORS[src] || PALETTE.rice.main
+  return SOURCE_COLORS[src] || PALETTE.ink.main
 }
 
 function typeLabel(t) {
@@ -142,7 +142,7 @@ function typeLabel(t) {
 }
 
 .ev-item.ev-type-biography {
-  border-left-color: var(--xingye-female || #b85878);
+  border-left-color: var(--female);
 }
 
 .ev-meta {
