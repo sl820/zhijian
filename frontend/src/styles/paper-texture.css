@@ -1,0 +1,60 @@
+/* ==================== 北宋方志博物 · 纸纹背景 ==================== */
+/* SVG noise 纹理（4% 透明度）— 模拟米黄纸的纤维感 */
+.paper-texture {
+  position: relative;
+}
+
+.paper-texture::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.4 0 0 0 0 0.36 0 0 0 0 0.3 0 0 0 0.06 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  background-size: 160px 160px;
+  opacity: 0.7;
+  mix-blend-mode: multiply;
+}
+
+.paper-texture > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* 米黄纸边角 — 微微变暗（古籍氧化痕迹） */
+.paper-aged {
+  position: relative;
+  background: var(--paper);
+}
+
+.paper-aged::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at top left, rgba(184, 148, 31, 0.08), transparent 50%),
+    radial-gradient(ellipse at bottom right, rgba(184, 148, 31, 0.06), transparent 50%);
+  mix-blend-mode: multiply;
+}
+
+/* 卷轴左/右木纹条 */
+.scroll-edge-left,
+.scroll-edge-right {
+  position: relative;
+}
+.scroll-edge-left::before,
+.scroll-edge-right::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--ink-wash);
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 1;
+}
+.scroll-edge-left::before { left: 24px; }
+.scroll-edge-right::after { right: 24px; }
