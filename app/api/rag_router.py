@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from ._shared import (
-    RAGRequest, RAGResponse, get_rag_service,
+    RAGRequest, RAGResponse, EvidenceItem, EvidenceResponse, get_rag_service,
 )
 
 logger = logging.getLogger(__name__)
@@ -19,21 +19,33 @@ router = APIRouter(prefix="/api/v1")
 # RAG (智能问答)
 # ============================================================
 
-@router.post("/rag/ask", response_model=RAGResponse)
+@router.post("/rag/ask", response_model=EvidenceResponse)
 async def rag_ask(request: RAGRequest, source: str = None):
     """RAG 智能问答接口
+
+    R9 升级（2026-06-18）：
+      - response_model 改为 EvidenceResponse（统一证据链）
+      - evidence 字段从 RAG sources 转换（source/chunk_id/confidence/snippet）
+      - 任何异常 → fallback=True + 兜底文案 + 单条 fallback evidence
+      - 前端可直接渲染 evidence chips + method 标签
+
+    竞赛交付改造（2026-06-18）：
+      - 任何异常（embedder 加载失败 / collection 缺失 / Ollama 宕机 / LLM timeout）
+        都不再 500，而是返回结构化 fallback {answer, evidence: [...]}
+      - 前端拿到的 response 永远是 EvidenceResponse，不会因为网络问题炸 UI
 
     Args:
         request: 问题 + top_k
         source: 数据源过滤（"jiapu" / "memory" / None=全源）。
             None 或 "all"：跨所有 collection 检索。
     """
-    try:
-        logger.info(f"RAG question: {request.question} (source={source})")
-        rag_service = get_rag_service()
+    FALLBACK_ANSWER = "当前无足够史料支撑该问题，请尝试其他朝代或家族进行问询。"
+    FALLBACK_EVIDENCE_TEXT = "暂无证据（RAG 检索失败或 collection 为空）"
 
+    logger.info(f"RAG question: {request.question} (source={source})")
+    try:
+        rag_service = get_rag_service()
         if source:
-            # 按 source 路由到对应 collection
             result = rag_service.ask_by_source(
                 question=request.question,
                 source=source,
@@ -42,13 +54,69 @@ async def rag_ask(request: RAGRequest, source: str = None):
         else:
             result = rag_service.ask(question=request.question, top_k=request.top_k)
 
-        return RAGResponse(
-            answer=result.get("answer", ""),
-            sources=result.get("sources", []),
+        answer = result.get("answer", "")
+        sources = result.get("sources", []) or []
+
+        # 防御：空 answer 也走 fallback 文案
+        if not answer or not answer.strip():
+            answer = FALLBACK_ANSWER
+
+        # 包装成 EvidenceItem 列表
+        evidence_list: List[EvidenceItem] = []
+        for s in sources:
+            try:
+                # RAG source dict 字段: text/source/score/chunk_id
+                score = float(s.get("score", 0))
+                # ChromaDB distance → 转为 confidence（越小越好，转换 0-1）
+                confidence = max(0.0, min(1.0, 1.0 - score))
+                evidence_list.append(EvidenceItem(
+                    source=f"rag:{s.get('source', 'unknown')[:30]}",
+                    node_ids=[],  # RAG 不知道具体节点 URI，留空
+                    edge_ids=[],
+                    confidence=confidence,
+                    snippet=(s.get("text") or "")[:200],
+                    title=s.get("source"),
+                ))
+            except Exception as e:
+                logger.warning(f"[rag] evidence 包装失败: {e}")
+                continue
+
+        # 兜底：evidence 为空时塞 1 条 fallback
+        is_fallback = False
+        if not evidence_list:
+            evidence_list.append(EvidenceItem(
+                source="fallback",
+                node_ids=[],
+                edge_ids=[],
+                confidence=0.0,
+                snippet=FALLBACK_EVIDENCE_TEXT,
+                title="兜底证据",
+            ))
+            is_fallback = True
+
+        return EvidenceResponse(
+            answer=answer,
+            evidence=evidence_list,
+            method="retrieval + llm (qwen2.5-3b via ollama)",
+            fallback=is_fallback,
         )
     except Exception as e:
         logger.error(f"Error in RAG ask: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # 竞赛交付：兜底永远返回 200 + 结构化 response
+        return EvidenceResponse(
+            answer=FALLBACK_ANSWER,
+            evidence=[EvidenceItem(
+                source="fallback",
+                node_ids=[],
+                edge_ids=[],
+                confidence=0.0,
+                snippet=f"系统异常：{str(e)[:150]}",
+                title="兜底证据",
+            )],
+            method="fallback",
+            fallback=True,
+            fallback_reason=str(e)[:200],
+        )
 
 
 @router.post("/rag/ingest")

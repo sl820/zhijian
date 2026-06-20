@@ -141,10 +141,12 @@ def compute_fa2_layout(
 
     # 计算每个节点的度（degree），hub 节点放大半径
     degree = np.array([G.degree(u) for u in uris], dtype=np.float32)
-    # hub: degree >= median * 3 → radius = base * 2.0；其余 = base
-    median_deg = float(np.median(degree)) if len(degree) > 0 else 1.0
-    node_sizes = np.where(degree >= median_deg * 3, base_radius * 2.0, base_radius).astype(np.float64)
-    print(f"      degree range: [{degree.min():.0f}, {degree.max():.0f}], median={median_deg:.0f}, hub count={int((degree >= median_deg * 3).sum())}")
+    # hub: 95 分位（top 5%），跨数据集可比
+    # 旧版 median*3 在 median=1 时门槛=3，5k 节点 38% 都被当 hub，FA2 推开太狠
+    # 95 分位 → 5000 节点 ~250 个真 hub，视觉聚焦更准
+    hub_threshold = float(np.percentile(degree, 95)) if len(degree) > 0 else 0
+    node_sizes = np.where(degree >= hub_threshold, base_radius * 3.0, base_radius).astype(np.float64)
+    print(f"      degree range: [{degree.min():.0f}, {degree.max():.0f}], hub_threshold(p95)={hub_threshold:.0f}, hub count={int((degree >= hub_threshold).sum())}")
 
     # FA2 参数（针对家谱关系密度调优 + collision-aware）
     forceatlas2 = ForceAtlas2(

@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from ._shared import (
     KGEntityExtractRequest, KGPipelineRequest, KGEntityStoreRequest,
     KGRelationRequest, KGInitResponse, KGInitStatusResponse,
-    get_kg_service,
+    EvidenceItem, EvidenceResponse, get_kg_service,
 )
 
 logger = logging.getLogger(__name__)
@@ -321,6 +321,154 @@ async def kg_get_evidence(uri: str, name: str = None):
     except Exception as e:
         logger.error(f"Error getting evidence for {uri}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/kg/person/{uri:path}/evidence-chain", response_model=EvidenceResponse)
+async def kg_get_evidence_chain(uri: str, name: str = None, question: str = "生平简介"):
+    """R9 统一证据链版 person evidence（response_model=EvidenceResponse）。
+
+    区别于 /evidence：
+      - 返回结构符合 R9 EvidenceResponse 规范（answer/evidence[]/method/fallback）
+      - evidence 项含 source/confidence/snippet
+      - 永不 500，失败走 fallback
+
+    Args:
+        uri: 人物 URI
+        name: 人物姓名（用于跨源匹配）
+        question: 用于 RAG 检索的查询文本
+    """
+    FALLBACK_ANSWER = "暂无人物证据（数据源未就绪或该人物不在索引中）"
+    FALLBACK_EVIDENCE_TEXT = "暂无证据（数据源未激活 / collection 为空 / LLM 不可用）"
+
+    try:
+        # 复用上面的 evidence 收集逻辑
+        # 直接构造一个轻量 list，避免再次 import 一堆
+        from ..database import source_router
+        evidence_items: List[EvidenceItem] = []
+
+        # 1. jiapu 源
+        if source_router.is_enabled("jiapu"):
+            try:
+                from ..database import jiapu_query
+                p = jiapu_query.get_person(uri, source="jiapu")
+                if p:
+                    src_cfg = source_router.assert_enabled("jiapu")
+                    import sqlite3
+                    conn = sqlite3.connect(str(src_cfg["path"]))
+                    conn.row_factory = sqlite3.Row
+                    for w in conn.execute(
+                        """SELECT w.title, w.description FROM works w
+                           JOIN person_works pw ON w.work_uri = pw.work_uri
+                           WHERE pw.person_uri = ? LIMIT 5""",
+                        (uri,),
+                    ).fetchall():
+                        snippet = w["description"] or w["title"] or ""
+                        if snippet:
+                            evidence_items.append(EvidenceItem(
+                                source="jiapu",
+                                node_ids=[uri],
+                                confidence=0.95,
+                                snippet=str(snippet)[:300],
+                                title=str(w["title"] or "家谱·始迁祖"),
+                                metadata={"evidence_type": "work_description", "source_label": "上海图书馆家谱"},
+                            ))
+                    for pl in conn.execute(
+                        """SELECT pl.label_chs, pl.description FROM places pl
+                           JOIN person_places pp ON pl.uri = pp.place_uri
+                           WHERE pp.person_uri = ? LIMIT 5""",
+                        (uri,),
+                    ).fetchall():
+                        snippet = pl["description"] or pl["label_chs"] or ""
+                        if snippet:
+                            evidence_items.append(EvidenceItem(
+                                source="jiapu",
+                                node_ids=[uri],
+                                confidence=0.90,
+                                snippet=str(snippet)[:300],
+                                title=str(pl["label_chs"] or "地名志"),
+                                metadata={"evidence_type": "place_record", "source_label": "上海图书馆家谱"},
+                            ))
+                    conn.close()
+            except Exception as e:
+                logger.warning(f"[evidence-chain] jiapu 失败: {e}")
+
+        # 2. memory KG
+        if name:
+            try:
+                from ..database.kg_service import KnowledgeGraphService
+                svc = KnowledgeGraphService()
+                person = svc.get_person_with_relations(name, depth=0)
+                if person and person.get("biography"):
+                    evidence_items.append(EvidenceItem(
+                        source="kg",
+                        node_ids=[uri],
+                        confidence=0.7,
+                        snippet=str(person["biography"])[:300],
+                        title=name,
+                        metadata={"evidence_type": "biography", "source_label": "内储知识图谱"},
+                    ))
+            except Exception as e:
+                logger.warning(f"[evidence-chain] kg 失败: {e}")
+
+        # 3. RAG top-3
+        if name:
+            try:
+                from app.rag.rag_service import get_rag_service
+                rag = get_rag_service()
+                rag_res = rag.ask_by_source(
+                    question=f"{name}：{question}",
+                    source="jiapu",
+                    top_k=3,
+                )
+                for r in (rag_res.get("sources") or [])[:3]:
+                    score = float(r.get("score", 0))
+                    evidence_items.append(EvidenceItem(
+                        source=f"rag:{r.get('source', 'unknown')[:30]}",
+                        node_ids=[uri],
+                        edge_ids=[],
+                        confidence=max(0.0, min(1.0, 1.0 - score)),
+                        snippet=(r.get("text") or "")[:200],
+                        title=r.get("source"),
+                        metadata={"evidence_type": "rag_chunk", "source_label": "RAG 检索片段"},
+                    ))
+            except Exception as e:
+                logger.warning(f"[evidence-chain] rag 失败: {e}")
+
+        # answer：从 evidence 拼接
+        if evidence_items:
+            snippets = [f"[{e.source}] {e.snippet[:80]}" for e in evidence_items[:3]]
+            answer = f"找到 {len(evidence_items)} 条证据：\n" + "\n".join(snippets)
+        else:
+            answer = FALLBACK_ANSWER
+            evidence_items.append(EvidenceItem(
+                source="fallback",
+                node_ids=[uri],
+                confidence=0.0,
+                snippet=FALLBACK_EVIDENCE_TEXT,
+                title="兜底证据",
+            ))
+
+        return EvidenceResponse(
+            answer=answer,
+            evidence=evidence_items,
+            method="graph_traversal + jiapu_sql + kg_inmemory + rag_retrieval",
+            fallback=len(evidence_items) == 0 or (len(evidence_items) == 1 and evidence_items[0].source == "fallback"),
+        )
+    except Exception as e:
+        logger.error(f"Error getting evidence-chain for {uri}: {e}")
+        return EvidenceResponse(
+            answer=FALLBACK_ANSWER,
+            evidence=[EvidenceItem(
+                source="fallback",
+                node_ids=[uri],
+                confidence=0.0,
+                snippet=f"系统异常：{str(e)[:150]}",
+                title="兜底证据",
+            )],
+            method="fallback",
+            fallback=True,
+            fallback_reason=str(e)[:200],
+        )
 
 
 @router.get("/kg/person/{uri:path}/rag")

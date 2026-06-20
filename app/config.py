@@ -87,6 +87,26 @@ DEFAULT_CORPUS_FILE = DEFAULT_CORPUS_DIR / "第二十一编人物.txt"
 # ZHIJIAN_OCR_ENABLED=true 启用
 OCR_ENABLED = _env_bool("ZHIJIAN_OCR_ENABLED", False)
 
+# ============================================================
+# 竞赛交付模式（DEMO_MODE）
+# ============================================================
+# 开启后：
+#   1. 限制节点上限（默认 5000）防止 33k 节点卡死浏览器
+#   2. 隐藏 OCR / 未完工模块入口
+#   3. 启用裁剪 / LOD / dim 节流
+#   4. 系统健康检查 FAIL 时进入 SAFE MODE（最小可演示）
+# 设置：ZHIJIAN_DEMO_MODE=true
+DEMO_MODE = _env_bool("ZHIJIAN_DEMO_MODE", False)
+DEMO_NODE_LIMIT = _env_int("ZHIJIAN_DEMO_NODE_LIMIT", 5000)
+
+# ============================================================
+# R9 研究叙事模式（NARRATIVE_MODE）
+# ============================================================
+# 开启后 /narrative 路由展示 4-step 故事流：研究问题 / 数据基础 / 方法 / 核心发现
+# 默认开（demo 阶段叙事模式是核心演示路径）
+# 设置：ZHIJIAN_NARRATIVE_MODE=false 关闭
+NARRATIVE_MODE = _env_bool("ZHIJIAN_NARRATIVE_MODE", True)
+
 
 # ============================================================
 # KG init: 朝代与年号词典

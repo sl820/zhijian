@@ -79,11 +79,15 @@ def _get_person_meta(source: str, needed_tails: set = None) -> Dict[str, Dict]:
                 p = _row_to_person(r)
                 raw_birthday = (r["birthday"] or "").strip()
                 birth_year = None
-                if raw_birthday and raw_birthday.replace("-", "").isdigit():
-                    try:
-                        birth_year = int(raw_birthday)
-                    except ValueError:
-                        birth_year = None
+                if raw_birthday:
+                    import re
+                    # 兼容 "1459", "1459.10.15", "-200" 等（CBDB/上图常用 YYYY.MM.DD 格式）
+                    m = re.match(r"^-?\d{2,4}", raw_birthday)
+                    if m:
+                        try:
+                            birth_year = int(m.group())
+                        except ValueError:
+                            birth_year = None
                 meta[tail] = {
                     "name": p.get("name", ""),
                     "category": p.get("person_type", 2),

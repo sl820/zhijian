@@ -59,10 +59,19 @@ def _row_to_person(row: sqlite3.Row) -> Dict:
 
 
 def count_persons(source: str = "jiapu") -> int:
-    """jiapu 总人数。"""
-    src = source_router.assert_enabled(source)
-    with _connect(src["path"]) as conn:
-        return conn.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
+    """jiapu 总人数。失败 → 返回 0（绝不抛，避免上游 research engine 整挂）。"""
+    try:
+        src = source_router.assert_enabled(source)
+        with _connect(src["path"]) as conn:
+            return conn.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
+    except Exception as e:
+        logger_msg = f"[jiapu_query] count_persons({source}) 失败: {e}"
+        try:
+            import logging
+            logging.getLogger(__name__).warning(logger_msg)
+        except Exception:
+            pass
+        return 0
 
 
 def list_persons(
