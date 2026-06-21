@@ -1,35 +1,83 @@
 import { useEffect, useState } from 'react'
-import { loadLayout, allPositions } from '@/data/position'
-import { useZhijianStore } from '@/state/store'
+import { Canvas } from '@react-three/fiber'
+import { BG_COLOR, FOG_NEAR, FOG_FAR } from '@/three/galaxyParams'
+import { dprMax, detectQuality } from '@/three/detectQuality'
+import { Galaxy } from '@/three/Galaxy'
+import { CoordinateRings } from '@/three/CoordinateRings'
+import { Landmarks } from '@/three/Landmarks'
+import { PersonStars } from '@/three/PersonStars'
+import { FlyControls } from '@/three/FlyControls'
+import { useZhijianStore, parsePermalink, syncPermalink } from '@/state/store'
+import { HUD } from '@/ui/HUD'
+import { PersonPanel } from '@/ui/PersonPanel'
 
 export function App() {
-  const [ready, setReady] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [count, setCount] = useState(0)
+  const quality = useZhijianStore((s) => s.quality)
+  const setQuality = useZhijianStore((s) => s.setQuality)
   const selectedPerson = useZhijianStore((s) => s.selectedPerson)
-  const setPerson = useZhijianStore((s) => s.setPerson)
+  const filters = useZhijianStore((s) => s.filters)
+
+  const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
-    loadLayout()
-      .then(() => {
-        setCount(allPositions().length)
-        setReady(true)
-      })
-      .catch((e: unknown) => setErr(String(e)))
+    setQuality(detectQuality())
+    const init = parsePermalink()
+    if (init.selectedPerson) useZhijianStore.getState().setPerson(init.selectedPerson)
+    if (init.filters) useZhijianStore.setState({ filters: init.filters })
+  }, [setQuality])
+
+  useEffect(() => {
+    syncPermalink({ selectedPerson, filters })
+  }, [selectedPerson, filters])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'h') {
+        useZhijianStore.getState().setUiHidden(!useZhijianStore.getState().uiHidden)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  if (err) return <div style={{ padding: 24, color: '#f88' }}>ERR: {err}</div>
-  if (!ready) return <div style={{ padding: 24, color: '#aaa' }}>志鉴 v2 · 引擎层 ready check…</div>
+  if (err) {
+    return (
+      <div style={{ padding: 24, color: '#f88', background: BG_COLOR, minHeight: '100vh' }}>
+        ERR: {err}
+      </div>
+    )
+  }
 
   return (
-    <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif', color: '#eee', background: '#000', minHeight: '100vh' }}>
-      <h1>志鉴 v2 · Phase C 引擎层</h1>
-      <p>layout 节点：<b>{count}</b></p>
-      <p>当前选中：<b>{selectedPerson ?? '（无）'}</b></p>
-      <button onClick={() => setPerson('0005c063mh4glmyk')}>选第一个 pid（demo）</button>
-      <p style={{ marginTop: 24, color: '#888', fontSize: 13 }}>
-        Phase C 完成。Phase D 启动 React 18 + Three.js 前端骨架。
-      </p>
+    <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', background: BG_COLOR }}>
+      <Canvas
+        camera={{ position: [0, 0, 3500], fov: 55, near: 0.1, far: 18000 }}
+        dpr={[1, dprMax(quality)]}
+        gl={{ antialias: false, powerPreference: 'high-performance' }}
+        raycaster={{ params: { Points: { threshold: 15 } } }}
+      >
+        <color attach="background" args={[BG_COLOR]} />
+        <fog attach="fog" args={[BG_COLOR, FOG_NEAR, FOG_FAR]} />
+        <Galaxy />
+        <CoordinateRings />
+        <Landmarks />
+        <PersonStars />
+        <FlyControls />
+      </Canvas>
+      <HUD />
+      <PersonPanel />
+      <div style={{
+        position: 'absolute',
+        bottom: 8,
+        left: 12,
+        color: '#666',
+        fontSize: 11,
+        fontFamily: 'system-ui',
+        zIndex: 50,
+        pointerEvents: 'none',
+      }}>
+        拖拽旋转 · WASD/Space/Shift 移动 · 滚轮缩放 · 点击节点查看 · H 隐/显
+      </div>
     </div>
   )
 }

@@ -112,3 +112,49 @@ master 9d34a5d (4 commits ahead of remote pre-push)
 **v1 残留**（未清理，等 Phase D 整块处理）：
 - frontend/src/{App.vue, components/, views/, router/, services/, stores/, styles/, constants/}
 - 4 稳定接口新文件不与 v1 冲突（不同子目录）
+
+---
+
+## Session 4 (2026-06-21) 摘要
+
+**核心**：Phase D 3D 骨架完成（React 18 + Three.js）。
+
+**Phase D 决策**：
+- 渲染：Points + ShaderMaterial（165k 节点），共享 geometry，朝代过滤走 `aSize = 0`
+- 拾取：同 group Points + `e.index` + Canvas raycaster threshold=15（弃 GPU color-id 拾取）
+- 字体：drei <Text> + unicode-font-resolver CDN（Phase D-12 自托管）
+- 朝代色：v1 11 朝 hue 调色板（THEME.ink/gold + 16 朝）
+- 坐标：x,y=disc 平面，z=世代极薄（[-1.5, 17.5]），camera (0,0,3500) 俯视，所有 group 绕 Z 转
+
+**关键 bug 修复**（4 个）：
+1. `gl_PointSize` 公式常数 300→25000（距离 6500 原来 0.046px→现在 7+ px）
+2. FlyControls dir 公式 z 分量加负号（默认朝 -Z，不是 +Z）
+3. CoordinateRings/Landmarks 平面从 XZ 改 XY（跟数据对齐）
+4. 拾取 `e.instanceId` → `e.index`（Points 非 InstancedMesh）；删整个 pick shader
+
+**测试**：
+- ✅ tsc --noEmit 0 错
+- ✅ vitest 14/14 PASS（Phase C 引擎层没坏）
+- ✅ vite build 3.48s，dist 1.1MB (gzip 318KB)
+- ✅ Dev server 渲染验证：4 重同心圆 + 28 宿 + 165k 点 + bulge + Landmarks 螺旋 wedge
+- ✅ 朝代过滤：点 minguo → URL `#d=minguo` 同步，最外圈白点 only
+- ⚠️ Canvas hover/click 真浏览器测试未跑（MCP synthetic dispatch 限制）
+
+**新增文件**：
+- frontend/src/three/{galaxyParams, detectQuality, positions, xingye, Galaxy, CoordinateRings, Landmarks, PersonStars, FlyControls}.{ts,tsx}
+- frontend/src/ui/{HUD, PersonPanel}.tsx
+
+**修改**：
+- frontend/src/App.tsx — Canvas 入口 + raycaster threshold
+- frontend/vite.config.ts — publicDir → ../public
+- frontend/package.json — 加 @react-three/drei
+
+**未完成 / 挂账**（按优先级）：
+- Phase D-7+ : KinshipLines / LinePanel / SearchPanel / Cinema / Onboarding
+- Phase D-12 : 字体自托管
+- Phase D-13 : Playwright 视觉回归
+- Phase D-14 : postprocessing Bloom
+- v1 Vue 残留删除（**建议下个 session 一并清**）
+- Phase E : 部署（precompress/nginx/og-inject/github-pages.yml + sl820.github.io/zhijian-v2/）
+- Phase F : 文档 6 篇（ARCHITECTURE / FRONTEND_GUIDE / ENGINE_API / DATA_CONTRACT / DEPLOY / PIPELINE / DATA_AUDIT）
+

@@ -2,18 +2,25 @@
  * 4 稳定接口 #4: zustand store + permalink
  *
  * 字段：
- *   selectedPerson: pid | null       — 当前选中的先祖
- *   selectedLine:   lineId | null    — 当前选中的支系
- *   flyTarget:      {x,y,z} | null   — fly mode 目标
- *   filters:        { dynasty, surname, generation } — UI 过滤
+ *   selectedPerson: pid | null
+ *   selectedLine:   lineId | null
+ *   hoverPid:       pid | null
+ *   flyTarget:      {x,y,z} | null
+ *   filters:        { dynasty, surname, generation }
+ *   uiHidden:       boolean
+ *   quality:        'low' | 'medium' | 'high'
  *
  * 永久链接：
- *   #a=<personId>    → selectedPerson
- *   #p=<谱名>.<代数>.<支号>  → TODO Phase D
- *   #l=<lineId>      → selectedLine
- *   #g=<generation>  → filters.generation
+ *   #a=<personId>  → selectedPerson
+ *   #h=<personId>  → hoverPid
+ *   #l=<lineId>    → selectedLine
+ *   #d=<dynasty>   → filters.dynasty
+ *   #g=<generation>→ filters.generation
+ *   #s=<surname>   → filters.surname
  */
 import { create } from 'zustand'
+
+export type Quality = 'low' | 'medium' | 'high'
 
 export interface Filters {
   dynasty: string | null
@@ -24,12 +31,18 @@ export interface Filters {
 interface ZhijianState {
   selectedPerson: string | null
   selectedLine: string | null
+  hoverPid: string | null
   flyTarget: { x: number; y: number; z: number } | null
   filters: Filters
+  uiHidden: boolean
+  quality: Quality
   setPerson: (pid: string | null) => void
   setLine: (lineId: string | null) => void
+  setHover: (pid: string | null) => void
   setFlyTarget: (t: { x: number; y: number; z: number } | null) => void
   setFilter: (k: keyof Filters, v: string | number | null) => void
+  setUiHidden: (v: boolean) => void
+  setQuality: (q: Quality) => void
   reset: () => void
 }
 
@@ -38,19 +51,26 @@ const DEFAULT_FILTERS: Filters = { dynasty: null, surname: null, generation: nul
 export const useZhijianStore = create<ZhijianState>((set) => ({
   selectedPerson: null,
   selectedLine: null,
+  hoverPid: null,
   flyTarget: null,
   filters: { ...DEFAULT_FILTERS },
+  uiHidden: false,
+  quality: 'high',
   setPerson: (pid) => set({ selectedPerson: pid }),
   setLine: (lineId) => set({ selectedLine: lineId }),
+  setHover: (pid) => set({ hoverPid: pid }),
   setFlyTarget: (t) => set({ flyTarget: t }),
   setFilter: (k, v) =>
     set((s: ZhijianState) => ({
       filters: { ...s.filters, [k]: v === '' ? null : v },
     })),
+  setUiHidden: (v) => set({ uiHidden: v }),
+  setQuality: (q) => set({ quality: q }),
   reset: () =>
     set({
       selectedPerson: null,
       selectedLine: null,
+      hoverPid: null,
       flyTarget: null,
       filters: { ...DEFAULT_FILTERS },
     }),
@@ -61,6 +81,7 @@ export function syncPermalink(state: Partial<ZhijianState>): void {
   if (typeof window === 'undefined') return
   const hash = new URLSearchParams()
   if (state.selectedPerson) hash.set('a', state.selectedPerson)
+  if (state.hoverPid) hash.set('h', state.hoverPid)
   if (state.selectedLine) hash.set('l', state.selectedLine)
   if (state.filters?.generation != null) hash.set('g', String(state.filters.generation))
   if (state.filters?.dynasty) hash.set('d', state.filters.dynasty)
@@ -86,6 +107,7 @@ export function parsePermalink(): Partial<ZhijianState> {
   if (g && !Number.isNaN(Number(g))) filters.generation = Number(g)
   return {
     selectedPerson: params.get('a') ?? null,
+    hoverPid: params.get('h') ?? null,
     selectedLine: params.get('l') ?? null,
     filters,
   }
