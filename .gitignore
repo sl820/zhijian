@@ -112,6 +112,8 @@ reports/
 # Data (too large for git, see README for setup)
 data/
 tessdata/
+# v2: frontend/src/data/ is TS source (load.ts, position.ts), not ETL data
+!frontend/src/data/
 
 # Stale deployment artifacts (Apr 2026 tarball + extracted bundle, do not commit)
 zhijian_deploy.tar.gz

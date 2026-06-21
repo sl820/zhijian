@@ -67,3 +67,48 @@ master 9d34a5d (4 commits ahead of remote pre-push)
 - 用户硬红线：git push / rebase / reset --hard / npm publish 都要先问
 - 工作流偏好：先 commit 再验证
 - 验证门槛：tsc + vitest + vite build 全绿
+
+---
+
+## Session 3 (2026-06-21) 摘要
+
+**核心**：Phase C 引擎层 TS 完成。
+
+**v2 → Phase C 决策**：
+- 工程基线：v1 Vue 全栈 → React 18.3 + TS 5.6 + Vite 5.4 + three 0.169 + @react-three/fiber + zustand 4.5 + vitest 2.1
+- 包管理器：npm（跟诗云）
+- Vite base：`/zhijian-v2/`（GH Pages 子路径）
+- Layout 数据：NPZ（Python 源）→ JSON（前端消费），`pipeline/npz_to_layout_json.py` 一次性生成 27MB jiapu_v2.json
+
+**4 稳定接口就位**：
+1. `src/data/load.ts` — loadPerson / loadLine / loadAncestors / searchSurname（Range fetch）
+2. `src/engine/engineApi.ts` — pullAt (3 mode) / unrankPerson / rankPerson / neighborsOf
+3. `src/data/position.ts` — personPosition(pid) → {dynasty, angle, z}（读 jiapu_v2.json）
+4. `src/state/store.ts` — zustand + syncPermalink + parsePermalink
+
+**测试**：
+- ✅ tsc --noEmit 0 错
+- ✅ vitest 14/14 PASS（findBucket 5 + Feistel 6 + rank/unrank 3）
+- ✅ vite build 706ms，dist 147KB (gzip 48KB)
+
+**Feistel 实现要点**：
+- 4 rounds 16-bit halves, 32-bit total
+- `feistelInv` 是真正的反向（keys 倒序 + swap 方向反），不是 involution
+- uniformity 10000 samples 16 桶 < 1.5x 均匀
+
+**新增文件**：
+- frontend/src/{main.tsx, App.tsx, types/*.ts, data/{load,position,load.test}.ts, engine/{scatter,engineApi,engine.test}.ts, state/store.ts}
+- frontend/{package.json, tsconfig.json, vite.config.ts, index.html} 全重写
+- pipeline/npz_to_layout_json.py
+- public/layouts/jiapu_v2.json (27MB, committed)
+
+**删除**：frontend/vite.config.js (v1 Vue 残留)
+
+**未完成 / 挂账**：
+- Phase D: React 18 + Three.js 前端骨架（Galaxy / PersonStars / RelationLines / FlyControls / SearchPanel / PersonPanel / LinePanel / Cinema / HUD）
+- Phase E: 部署（precompress / nginx / og-inject / github-pages.yml + 部署到 sl820.github.io/zhijian-v2/）
+- Phase F: 文档（ARCHITECTURE / FRONTEND_GUIDE / ENGINE_API / DATA_CONTRACT / DEPLOY / PIPELINE / DATA_AUDIT）
+
+**v1 残留**（未清理，等 Phase D 整块处理）：
+- frontend/src/{App.vue, components/, views/, router/, services/, stores/, styles/, constants/}
+- 4 稳定接口新文件不与 v1 冲突（不同子目录）

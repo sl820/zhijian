@@ -5,6 +5,34 @@
 
 ## Sessions
 
+### 2026-06-21 · Session 3 · Phase C 引擎层 TS 完成
+
+**触发**：Phase B 数据就绪后，启动 Phase C 引擎层（4 稳定接口 TypeScript 实现）。
+
+**关键决策**：
+- D15: 前端栈定型 React 18.3 + TS 5.6 + Vite 5.4 + three 0.169 + @react-three/fiber + zustand 4.5 + vitest 2.1
+- D16: vite base = `/zhijian-v2/`（GH Pages 子路径）
+- D17: layout 数据走 JSON（`public/layouts/jiapu_v2.json` 27MB）— 不让浏览器解析 NPZ
+- D18: 4 稳定接口路径固化（CLAUDE.md 红线）：data/load.ts + engine/engineApi.ts + data/position.ts + state/store.ts
+- D19: Feistel 用 4 轮 16-bit halves，feistelInv 是真正的反向（keys 倒序 + swap 方向反）— 不是 involution
+- D20: pullAt PoC 用 placeholder（mode 解析 + 接口签名，Phase D 接完整实现）
+
+**变更**：
+- 11 个新文件（src/ 4 稳定接口 + 5 类型 + 2 测试 + main + App）
+- 4 个工程基线重写（package.json / tsconfig.json / vite.config.ts / index.html）
+- 1 个 v1 残留删除（vite.config.js）
+- 1 个数据产物（public/layouts/jiapu_v2.json 27MB，committed）
+- 1 个 ETL 辅助脚本（pipeline/npz_to_layout_json.py）
+
+**验证**：✅ tsc 0 错 · ✅ vitest 14/14 PASS · ✅ vite build 706ms 出 dist 147KB (gzip 48KB) · ⏳ Phase D 启动条件具备
+
+**挂账**：
+- [ ] Phase D: React 18 + Three.js 前端骨架（Galaxy / PersonStars / RelationLines / FlyControls / SearchPanel / PersonPanel / LinePanel / Cinema / HUD）
+- [ ] Phase E: deploy/ 三件套 + 部署到 sl820.github.io/zhijian-v2/
+- [ ] Phase F: docs/{ARCHITECTURE, FRONTEND_GUIDE, ENGINE_API, DATA_CONTRACT, DEPLOY, PIPELINE, DATA_AUDIT}.md
+
+详细 Session 3 文档：`docs/devlog/2026-06-21-session-3.md`
+
 ### 2026-06-21 · Session 2 · Phase B 数据 ETL 完成
 
 **触发**：Phase A 工作树冻结后，启动 Phase B 数据 ETL pipeline。
