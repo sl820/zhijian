@@ -5,6 +5,40 @@
 
 ## Sessions
 
+### 2026-06-21 · Session 2 · Phase B 数据 ETL 完成
+
+**触发**：Phase A 工作树冻结后，启动 Phase B 数据 ETL pipeline。
+
+**关键决策**：
+- D8: 朝代归并 3121 → 16 key（取复合字符串中第一个朝代 + 细分朝代归主朝代）
+- D9: persons ETL 范围扩到全集 167 万（不是原计划 33 万）— 覆盖 relations 端点全集
+- D10: ETL 中间产物不入 git，公共桶 127MB（GH Pages 1GB 限额内）
+- D11: 布局从 FA2 改成"朝代径向 + 姓氏角向 + 世代 z"（v2 设计）
+- D12: relations 两源合并（person_relations 13k + cbdb_relations 588k → 466k）
+- D13: common 姓氏阈值降到 800（81 个 common）
+- D14: name_lexicon 用全集 167 万 → 34,801 字 + 12,111 号
+
+**数据画像**：
+- persons 1,679,876（全集）/ 165,022（有朝代 = v2 数据上界）
+- relations 466,108（端点全集在 persons 内，无悬空）
+- 5 个朝代壳承载 93% 数据（明 36.76% / 清 18.19% / 宋 20.63% / 元 11.57% / 唐 5.94%）
+
+**变更**：
+- 9 个新文件（pipeline/）
+- 5 个 intermediate + 3 个公共数据集
+- 1 个布局 NPZ
+- 1 个 validator（23/23 PASS）
+
+**验证**：✅ validate_pipeline.py 23/23 PASS · ✅ 总 ETL ~9 分钟 · ⏳ Phase C 启动条件具备
+
+**挂账**：
+- [ ] Phase C: 引擎层 TS（4 稳定接口 + 双射 PoC + scatter）
+- [ ] Phase D: React 18 + Three.js 前端骨架（Galaxy / PersonStars / RelationLines / Range provider）
+- [ ] Phase E: deploy/ 三件套（precompress / nginx / og-inject / github-pages.yml）
+- [ ] Phase F: docs/{ARCHITECTURE, FRONTEND_GUIDE, ENGINE_API, DATA_CONTRACT, DEPLOY, PIPELINE, DATA_AUDIT}.md
+
+详细 Session 2 文档：`docs/devlog/2026-06-21-session-2.md`
+
 ### 2026-06-20 · Session 1 · v2 启动 + 模板分析 + 工作树冻结
 
 **触发**：用户看到 [Cohenjikan/shiyun](https://github.com/Cohenjikan/shiyun) 诗云项目后，决定仿照其架构重做志鉴，仅替换数据层（家谱替换诗歌）。
@@ -35,15 +69,6 @@
 - `40d754d` docs(v2): CLAUDE.md/README.md/AGENTS.md/PROJECT_SPEC.md 重写 + .gitignore v2 适配
 
 **验证**：✅ git tree clean · ✅ push 到 origin 成功 · ✅ 新分支就绪 · ⏳ Phase B 启动条件具备
-
-**挂账**：
-- [ ] Phase B: pipeline ETL 脚本（extract_persons / extract_relations / build_dynasties / build_surnames / build_name_lexicon / pack_data / precompute_layout / validate_pipeline）
-- [ ] Phase B: 33 万 FA2 全量 precompute（补完 M5 遗留）
-- [ ] Phase C: 引擎层 TypeScript（FA2 wrapper + 双射 PoC + scatter + engineApi）
-- [ ] Phase D: React 18 + Three.js 前端骨架（Galaxy / PersonStars / RelationLines / FlyControls / gpuPick / StarFieldBackground）
-- [ ] Phase D: UI 样壳（SearchPanel / PersonPanel / LinePanel / Cinema / HUD）+ zustand store + permalink
-- [ ] Phase E: deploy/ 三件套（precompress / nginx / og-inject / github-pages.yml）
-- [ ] Phase F: docs/{ARCHITECTURE, FRONTEND_GUIDE, ENGINE_API, DATA_CONTRACT, DEPLOY, PIPELINE, DATA_AUDIT}.md
 
 ## 协议
 

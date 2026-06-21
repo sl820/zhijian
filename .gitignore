@@ -125,10 +125,13 @@ tests/_tmp_*.json
 .vite/
 *.tsbuildinfo
 
-# Static data ETL output (committed as-is, but ignore temp/large)
-public/persons/*.tmp
+# Static data ETL output
+# - JSON buckets are committed (Range 取片 must work)
+# - NPZ layouts are gitignored (太大，50MB+)
+# - Temp files ignored
 public/layouts/*.tmp
 public/layouts/*.bak
+public/layouts/*.npz
 
 # Local config
 .env.local
