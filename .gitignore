@@ -17,6 +17,8 @@ venv.bak/
 
 # Playwright / 视觉回归
 screenshots/
+test-results/
+playwright-report/
 
 # Virtual environments
 .venv_paddle/

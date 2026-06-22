@@ -17,7 +17,7 @@ export default defineConfig({
   },
   webServer: {
     command: 'npx vite --port 5173 --host 127.0.0.1',
-    url: 'http://127.0.0.1:5173/zhijian-v2/',
+    url: 'http://127.0.0.1:5173/',
     timeout: 60_000,
     reuseExistingServer: true,
     stdout: 'pipe',

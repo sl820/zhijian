@@ -16,7 +16,7 @@ import { join } from 'node:path'
 const SHOT_DIR = join(process.cwd(), 'screenshots')
 mkdirSync(SHOT_DIR, { recursive: true })
 
-const URL_BASE = '/zhijian-v2/'
+const URL_BASE = '/'
 
 async function waitCanvas(page: import('@playwright/test').Page) {
   await page.waitForSelector('canvas', { timeout: 15_000 })

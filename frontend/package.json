@@ -9,7 +9,11 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "og:image": "python deploy/build-og-image.py",
+    "precompress": "node deploy/precompress.mjs dist",
+    "og:inject": "node deploy/og-inject.mjs dist https://sl820.github.io/zhijian",
+    "deploy:local": "npm run og:image && npm run build && npm run precompress && npm run og:inject && touch dist/.nojekyll"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.0",

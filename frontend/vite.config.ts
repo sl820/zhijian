@@ -4,7 +4,7 @@ import path from 'path'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/zhijian-v2/',
+  base: '/zhijian/',
   publicDir: path.resolve(__dirname, '../public'),
   resolve: {
     alias: {
