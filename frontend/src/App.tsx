@@ -10,6 +10,7 @@ import { FlyControls } from '@/three/FlyControls'
 import { useZhijianStore, parsePermalink, syncPermalink } from '@/state/store'
 import { HUD } from '@/ui/HUD'
 import { PersonPanel } from '@/ui/PersonPanel'
+import { SearchPanel } from '@/ui/SearchPanel'
 
 export function App() {
   const quality = useZhijianStore((s) => s.quality)
@@ -32,6 +33,16 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        useZhijianStore.getState().setSearchOpen(false)
+        return
+      }
+      if (e.target instanceof HTMLInputElement) return
+      if (e.key === '/') {
+        e.preventDefault()
+        useZhijianStore.getState().setSearchOpen(true)
+        return
+      }
       if (e.key.toLowerCase() === 'h') {
         useZhijianStore.getState().setUiHidden(!useZhijianStore.getState().uiHidden)
       }
@@ -54,7 +65,7 @@ export function App() {
         camera={{ position: [0, 0, 3500], fov: 55, near: 0.1, far: 18000 }}
         dpr={[1, dprMax(quality)]}
         gl={{ antialias: false, powerPreference: 'high-performance' }}
-        raycaster={{ params: { Points: { threshold: 15 } } }}
+        raycaster={{ params: { Points: { threshold: 15 } } as never }}
       >
         <color attach="background" args={[BG_COLOR]} />
         <fog attach="fog" args={[BG_COLOR, FOG_NEAR, FOG_FAR]} />
@@ -65,6 +76,7 @@ export function App() {
         <FlyControls />
       </Canvas>
       <HUD />
+      <SearchPanel />
       <PersonPanel />
       <div style={{
         position: 'absolute',
@@ -76,7 +88,7 @@ export function App() {
         zIndex: 50,
         pointerEvents: 'none',
       }}>
-        拖拽旋转 · WASD/Space/Shift 移动 · 滚轮缩放 · 点击节点查看 · H 隐/显
+        拖拽旋转 · WASD/Space/Shift 移动 · 滚轮缩放 · 点击节点查看 · / 搜 · H 隐/显
       </div>
     </div>
   )

@@ -58,4 +58,11 @@ export function allPositions(): { pid: string; p: Position }[] {
   return out
 }
 
+/** pid → 世界坐标 (x, y, z)。null 表示未在 layout 中。 */
+export function personWorldPos(pid: string): { x: number; y: number; z: number } | null {
+  const p = getPosition(pid)
+  if (!p) return null
+  return { x: p.x, y: p.y, z: p.z }
+}
+
 export { DYN2ID }

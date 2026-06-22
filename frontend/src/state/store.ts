@@ -36,6 +36,7 @@ interface ZhijianState {
   filters: Filters
   uiHidden: boolean
   quality: Quality
+  searchOpen: boolean
   setPerson: (pid: string | null) => void
   setLine: (lineId: string | null) => void
   setHover: (pid: string | null) => void
@@ -43,6 +44,7 @@ interface ZhijianState {
   setFilter: (k: keyof Filters, v: string | number | null) => void
   setUiHidden: (v: boolean) => void
   setQuality: (q: Quality) => void
+  setSearchOpen: (v: boolean) => void
   reset: () => void
 }
 
@@ -56,6 +58,7 @@ export const useZhijianStore = create<ZhijianState>((set) => ({
   filters: { ...DEFAULT_FILTERS },
   uiHidden: false,
   quality: 'high',
+  searchOpen: false,
   setPerson: (pid) => set({ selectedPerson: pid }),
   setLine: (lineId) => set({ selectedLine: lineId }),
   setHover: (pid) => set({ hoverPid: pid }),
@@ -66,6 +69,7 @@ export const useZhijianStore = create<ZhijianState>((set) => ({
     })),
   setUiHidden: (v) => set({ uiHidden: v }),
   setQuality: (q) => set({ quality: q }),
+  setSearchOpen: (v) => set({ searchOpen: v }),
   reset: () =>
     set({
       selectedPerson: null,

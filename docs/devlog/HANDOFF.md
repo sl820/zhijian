@@ -158,3 +158,43 @@ master 9d34a5d (4 commits ahead of remote pre-push)
 - Phase E : 部署（precompress/nginx/og-inject/github-pages.yml + sl820.github.io/zhijian-v2/）
 - Phase F : 文档 6 篇（ARCHITECTURE / FRONTEND_GUIDE / ENGINE_API / DATA_CONTRACT / DEPLOY / PIPELINE / DATA_AUDIT）
 
+
+## Session 5 (2026-06-22) 摘要
+
+**核心**：Phase D-9 SearchPanel 完成（4 tab 搜索先祖 + camera fly + 并行 fetch）。
+
+**Phase D-9 决策**：
+- 4 tab：姓（searchSurname + CN→pinyin 映射）/ 名（searchByName 子串）/ 支系（searchByLine 按 family_uri 去重）/ 朝代（getDynastyCounts 列 16 朝代 + 人数）
+- 并行 fetch：83 桶 `Promise.all` 并行拉（之前串行 > 6s，并行后 ~1.5s）
+- camera fly：store `flyTarget` → FlyControls subscribe → useFrame lerp 4.0 → 距离 < 5 清空。用户拖拽/滚轮/再按 WASD 自动取消
+- 快捷键：`/` 打开 SearchPanel + `Esc` 关闭
+
+**关键 bug 修复**（3 个）：
+1. `family_name` 字段是 pinyin（'han'）不是中文（'韩'）→ 加载时建 cnToPinyin map 一次永久
+2. TS `RaycasterParameters` 类型严格 → `as never`
+3. layout `Position` 已预计算 x/y/z → 不现场算 `r * cos θ`（避免浮点误差）
+
+**测试**：
+- ✅ tsc --noEmit 0 错
+- ✅ vitest 14/14 PASS（不变）
+- ✅ vite build 3.66s，dist 1.1MB (gzip 320KB)
+- ✅ Playwright 6/6 PASS（46.7s，含原 5 + 新 1）
+
+**新增文件**：
+- frontend/src/ui/SearchPanel.tsx
+
+**修改**：
+- frontend/src/data/load.ts — searchByName/searchByLine/getAllFamilyNames/getDynastyCounts + cnToPinyin + 并行 fetch
+- frontend/src/data/position.ts — personWorldPos 用 layout 预计算
+- frontend/src/state/store.ts — searchOpen + setSearchOpen
+- frontend/src/three/FlyControls.tsx — flyTarget subscribe + lerp + cancelFly
+- frontend/src/ui/HUD.tsx — 搜按钮
+- frontend/src/App.tsx — mount SearchPanel + / 快捷键 + Esc 关闭
+- frontend/tests/playwright/phase-d.spec.ts — 加 test 6
+
+**未完成 / 挂账**（按优先级）：
+- Phase E : 部署（precompress/nginx/og-inject/github-pages.yml + sl820.github.io/zhijian-v2/）
+- Phase F : 文档 6 篇（ARCHITECTURE / FRONTEND_GUIDE / ENGINE_API / DATA_CONTRACT / DEPLOY / PIPELINE / DATA_AUDIT）
+- Phase D-7/8/10/11/12/14 延后 : KinshipLines / LinePanel / Cinema / Onboarding / 字体自托管 / Bloom
+
+---

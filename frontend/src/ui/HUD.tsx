@@ -11,6 +11,7 @@ export function HUD() {
   const setFilter = useZhijianStore((s) => s.setFilter)
   const uiHidden = useZhijianStore((s) => s.uiHidden)
   const setUiHidden = useZhijianStore((s) => s.setUiHidden)
+  const setSearchOpen = useZhijianStore((s) => s.setSearchOpen)
 
   if (uiHidden) {
     return (
@@ -24,6 +25,7 @@ export function HUD() {
     <div style={hudStyle}>
       <div style={rowStyle}>
         <span style={titleStyle}>志鉴 · 家谱星图</span>
+        <button style={btn} onClick={() => setSearchOpen(true)}>搜</button>
         <button style={btn} onClick={reset}>重置</button>
         <button style={btn} onClick={() => setUiHidden(true)}>隐</button>
       </div>

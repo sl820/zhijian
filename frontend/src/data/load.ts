@@ -18,10 +18,11 @@ interface BucketCache {
   index: BucketIndex
   byPid: Map<string, Person> | null
   byLineId: Map<string, Line> | null
+  cnToPinyin: Map<string, string> | null
 }
 
-const personsCache: BucketCache = { index: { version: 0, prefix: '', buckets: [] }, byPid: null, byLineId: null }
-const relationsCache: BucketCache = { index: { version: 0, prefix: '', buckets: [] }, byPid: null, byLineId: null }
+const personsCache: BucketCache = { index: { version: 0, prefix: '', buckets: [] }, byPid: null, byLineId: null, cnToPinyin: null }
+const relationsCache: BucketCache = { index: { version: 0, prefix: '', buckets: [] }, byPid: null, byLineId: null, cnToPinyin: null }
 
 async function fetchIndex(dir: string, cache: BucketCache): Promise<BucketIndex> {
   if (cache.index.buckets.length > 0) return cache.index
@@ -58,11 +59,22 @@ async function ensurePersonsLoaded(): Promise<Map<string, Person>> {
   if (personsCache.byPid) return personsCache.byPid
   const idx = await fetchIndex(PERSONS_DIR, personsCache)
   const all = new Map<string, Person>()
-  for (const b of idx.buckets) {
-    const rows = (await fetchBucket(PERSONS_DIR, 'persons', b)) as Person[]
-    for (const p of rows) all.set(p.pid, p)
+  const cnMap: Map<string, string> = new Map()
+  // 并行拉所有 bucket（83 桶 ≈ 50MB，浏览器 6 并发足够）
+  const allRows = await Promise.all(
+    idx.buckets.map((b) => fetchBucket(PERSONS_DIR, 'persons', b) as Promise<Person[]>)
+  )
+  for (const rows of allRows) {
+    for (const p of rows) {
+      all.set(p.pid, p)
+      if (p.name && p.family_name && p.name.length > 0) {
+        const firstChar = p.name.charAt(0)
+        if (!cnMap.has(firstChar)) cnMap.set(firstChar, p.family_name.toLowerCase())
+      }
+    }
   }
   personsCache.byPid = all
+  personsCache.cnToPinyin = cnMap
   return all
 }
 
@@ -70,11 +82,12 @@ async function ensureRelationsLoaded(): Promise<Relation[]> {
   if (relationsCache.byPid) return relationsCache.byPid as unknown as Relation[]
   const idx = await fetchIndex(RELATIONS_DIR, relationsCache)
   const all: Relation[] = []
-  for (const b of idx.buckets) {
-    const rows = (await fetchBucket(RELATIONS_DIR, 'relations', b)) as Relation[]
+  const allRows = await Promise.all(
+    idx.buckets.map((b) => fetchBucket(RELATIONS_DIR, 'relations', b) as Promise<Relation[]>)
+  )
+  for (const rows of allRows) {
     for (const r of rows) all.push(r)
   }
-  // 临时塞到 byPid 字段复用 cache
   ;(relationsCache as unknown as { byPid: Relation[] }).byPid = all
   return all
 }
@@ -144,20 +157,104 @@ export async function loadAncestors(pid: string): Promise<string[]> {
 }
 
 /**
- * 按姓氏搜索（拼音前缀匹配）。
+ * 按姓氏搜索（支持中文字符：自动映射到拼音前缀；纯 pinyin 输入直接前缀匹配）。
  * 返回匹配的 Person 列表（按朝代 + 姓名排序，截前 50）。
  */
 export async function searchSurname(query: string, limit = 50): Promise<Person[]> {
   if (!query) return []
   const q = query.toLowerCase()
   const all = await ensurePersonsLoaded()
+  const cnMap = personsCache.cnToPinyin ?? new Map<string, string>()
+  // 查 CN → pinyin：query 是中文时取对应 pinyin prefix
+  const pinyinPrefix = cnMap.get(query) ?? q
   const out: Person[] = []
   for (const p of all.values()) {
-    if (p.family_name.startsWith(q) || p.name.startsWith(query) || p.pid.startsWith(q)) {
+    if (
+      p.family_name.toLowerCase().startsWith(pinyinPrefix) ||
+      p.name.startsWith(query) ||
+      p.pid.startsWith(q)
+    ) {
       out.push(p)
       if (out.length >= limit * 4) break
     }
   }
   out.sort((a, b) => a.dynasty.localeCompare(b.dynasty) || a.name.localeCompare(b.name, 'zh'))
   return out.slice(0, limit)
+}
+
+/**
+ * 按名/字/号搜索（子串匹配）。
+ * 返回匹配的 Person 列表（按朝代 + 姓名排序，截前 limit）。
+ */
+export async function searchByName(query: string, limit = 50): Promise<Person[]> {
+  if (!query) return []
+  const q = query.trim()
+  if (!q) return []
+  const all = await ensurePersonsLoaded()
+  const out: Person[] = []
+  for (const p of all.values()) {
+    if (
+      p.name.includes(q) ||
+      p.name_alt.includes(q) ||
+      p.courtesy.includes(q) ||
+      p.pseudonym.includes(q)
+    ) {
+      out.push(p)
+      if (out.length >= limit * 4) break
+    }
+  }
+  out.sort((a, b) => a.dynasty.localeCompare(b.dynasty) || a.name.localeCompare(b.name, 'zh'))
+  return out.slice(0, limit)
+}
+
+/**
+ * 按支系搜索（family_name 或 family_uri 子串匹配）。
+ * 返回去重后的 Person 列表（同 family_uri 只返回最早一代始祖）。
+ */
+export async function searchByLine(query: string, limit = 50): Promise<Person[]> {
+  if (!query) return []
+  const q = query.trim()
+  if (!q) return []
+  const all = await ensurePersonsLoaded()
+  const byLineUri: Map<string, Person> = new Map()
+  for (const p of all.values()) {
+    if (!p.family_uri) continue
+    if (p.family_uri.includes(q) || p.family_name.includes(q)) {
+      // 同 line 只留 generation 最小（即始祖）
+      const cur = byLineUri.get(p.family_uri)
+      if (!cur || p.generation < cur.generation) {
+        byLineUri.set(p.family_uri, p)
+      }
+      if (byLineUri.size >= limit * 4) break
+    }
+  }
+  const out = Array.from(byLineUri.values())
+  out.sort((a, b) => a.dynasty.localeCompare(b.dynasty) || a.family_name.localeCompare(b.family_name, 'zh'))
+  return out.slice(0, limit)
+}
+
+/** 拉所有不重复的 family_name 列表（按出现频次倒序），给姓 tab 自动补全。 */
+export async function getAllFamilyNames(limit = 200): Promise<{ name: string; count: number }[]> {
+  const all = await ensurePersonsLoaded()
+  const cnt: Map<string, number> = new Map()
+  for (const p of all.values()) {
+    if (!p.family_name) continue
+    cnt.set(p.family_name, (cnt.get(p.family_name) ?? 0) + 1)
+  }
+  return Array.from(cnt.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([name, count]) => ({ name, count }))
+}
+
+/** 按朝代统计 Person 数量，给朝代 tab 显示。 */
+export async function getDynastyCounts(): Promise<{ dynasty: string; count: number }[]> {
+  const all = await ensurePersonsLoaded()
+  const cnt: Map<string, number> = new Map()
+  for (const p of all.values()) {
+    cnt.set(p.dynasty, (cnt.get(p.dynasty) ?? 0) + 1)
+  }
+  return Array.from(cnt.entries())
+    .map(([dynasty, count]) => ({ dynasty, count }))
+    .sort((a, b) => b.count - a.count)
 }
